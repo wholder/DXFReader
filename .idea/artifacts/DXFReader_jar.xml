@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" build-on-make="true" name="DXFReader:jar">
+    <output-path>$PROJECT_DIR$/out/artifacts/DXFReader_jar</output-path>
+    <root id="archive" name="DXFReader.jar">
+      <element id="module-output" name="DXFReader" />
+    </root>
+  </artifact>
+</component>
