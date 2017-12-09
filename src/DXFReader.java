@@ -408,8 +408,12 @@ public class DXFReader {
   }
 
   public static void main (String[] args) throws Exception {
-    DXFReader dxf = new DXFReader();
-    Shape[] shapes = dxf.parseFile(new File(args[0]), 10.0);
-    new DXFViewer(shapes);
+    if (args.length < 1) {
+      System.out.println("Usage: java -jar DXFReader.jar <dxf file>");
+    } else {
+      DXFReader dxf = new DXFReader();
+      Shape[] shapes = dxf.parseFile(new File(args[0]), 10.0);
+      new DXFViewer(shapes);
+    }
   }
 }
