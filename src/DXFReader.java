@@ -46,6 +46,7 @@ public class DXFReader {
   private ArrayList<Entity>   stack = new ArrayList<>();
   private Map<String,String>  hVariables;                 // Map of Header Variables
   private Entity              cEntity = null;
+  private boolean             DEBUG = false;
 
   static class Entity {
     private String        type;
@@ -127,6 +128,54 @@ public class DXFReader {
         }
       }
       if (closePath) {
+        path.closePath();
+      }
+    }
+  }
+
+  static class LwPolyline extends Entity {
+    Path2D.Double         path = new Path2D.Double();
+    List<Point2D.Double>  cPoints = new ArrayList<>();
+    private double        xCp, yCp;
+    private boolean       hasXcp, hasYcp;
+    private boolean       firstPoint = true;
+    private boolean       closed;
+
+    LwPolyline (String type) {
+      super(type);
+    }
+
+    @Override
+    void addParm (int gCode, String value) {
+      switch (gCode) {
+      case 10:                              // Control Point X
+        xCp = Double.parseDouble(value);
+        hasXcp = true;
+        break;
+      case 20:                              // Control Point Y
+        yCp = Double.parseDouble(value);
+        hasYcp = true;
+        break;
+      case 70:
+        int flags = Integer.parseInt(value);
+        closed = (flags & 0x01) != 0;
+        break;
+      }
+      if (hasXcp && hasYcp) {
+        cPoints.add(new Point2D.Double(xCp, yCp));
+        hasXcp = hasYcp = false;
+        if (firstPoint) {
+          firstPoint = false;
+          path.moveTo(xCp, yCp);
+        } else {
+          path.lineTo(xCp, yCp);
+        }
+      }
+    }
+
+    @Override
+    void close () {
+      if (closed) {
         path.closePath();
       }
     }
@@ -240,8 +289,17 @@ public class DXFReader {
   private void addChildToTop (Entity child) {
     if (stack.size() > 0) {
       Entity top =  stack.get(stack.size() - 1);
-      top.addChild(child);
+      if (top != null) {
+        top.addChild(child);
+      }
     }
+  }
+
+  private void debugPrint (String value) {
+    for (int ii = 0; ii < stack.size(); ii++) {
+      System.out.print("  ");
+    }
+    System.out.println(value);
   }
 
   Shape[] parseFile (File file, double maxSize) throws IOException {
@@ -256,6 +314,9 @@ public class DXFReader {
       int gCode = Integer.parseInt(line);
       switch (gCode) {
       case 0:                             // Entity type
+        if (DEBUG) {
+          debugPrint(value);
+        }
         switch (value) {
         case "SECTION":
           cEntity = new Entity(null);
@@ -300,6 +361,12 @@ public class DXFReader {
           }
           addChildToTop(cEntity = new Entity(value));
           break;
+        case "LWPOLYLINE":
+          push();
+          LwPolyline lwPoly = new LwPolyline(value);
+          shapes.add(lwPoly.path);
+          addChildToTop(cEntity = lwPoly);
+          break;
         case "POLYLINE":
           push();
           Polyline poly = new Polyline(value);
@@ -334,6 +401,9 @@ public class DXFReader {
       default:
         if (cEntity != null) {
           cEntity.addParm(gCode, value);
+          if (DEBUG) {
+            debugPrint(gCode + ": " + value);
+          }
         }
         break;
       }
@@ -384,7 +454,7 @@ public class DXFReader {
       if (bounds != null) {
         int wid = (int) Math.round((bounds.getWidth() + border * 2) * SCREEN_PPI);
         int hyt = (int) Math.round((bounds.getHeight() + border * 2) * SCREEN_PPI);
-        setSize(wid, hyt);
+        setSize(Math.max(wid, 640), Math.max(hyt, 400));
       }
       setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
       setResizable(false);
@@ -404,7 +474,7 @@ public class DXFReader {
       for (Shape shape : shapes) {
         g2.draw(atScale.createTransformedShape(shape));
       }
-      g2.drawString("Paths: " + shapes.length, 20, 30);
+      g2.drawString("Paths: " + shapes.length, 20, 40);
     }
 
   }
