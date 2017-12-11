@@ -338,23 +338,25 @@ public class DXFReader {
         break;
       }
     }
-    Rectangle2D bounds = null;
-    for (Shape shape : shapes) {
-      bounds = bounds == null ? shape.getBounds2D() : bounds.createUnion(shape.getBounds2D());
-    }
-    double scale = 1;
-    double maxAxis = Math.max(bounds.getWidth(), bounds.getHeight());
-    // Limit size to 10 inches on max dimension
-    if (maxAxis > maxSize) {
-      scale = maxSize / maxAxis;
-    }
-    // Scale, as needed, and flip Y axis
-    AffineTransform at = new AffineTransform();
-    at.scale(scale, -scale);
-    at.translate(-bounds.getMinX(), -bounds.getHeight() -bounds.getMinY());
     Shape[] sOut = new Shape[shapes.size()];
-    for (int ii = 0; ii < shapes.size(); ii++) {
-      sOut[ii] = at.createTransformedShape(shapes.get(ii));
+    if (shapes.size() > 0) {
+      Rectangle2D bounds = null;
+      for (Shape shape : shapes) {
+        bounds = bounds == null ? shape.getBounds2D() : bounds.createUnion(shape.getBounds2D());
+      }
+      double scale = 1;
+      double maxAxis = Math.max(bounds.getWidth(), bounds.getHeight());
+      // Limit size to 10 inches on max dimension
+      if (maxAxis > maxSize) {
+        scale = maxSize / maxAxis;
+      }
+      // Scale, as needed, and flip Y axis
+      AffineTransform at = new AffineTransform();
+      at.scale(scale, -scale);
+      at.translate(-bounds.getMinX(), -bounds.getHeight() - bounds.getMinY());
+      for (int ii = 0; ii < shapes.size(); ii++) {
+        sOut[ii] = at.createTransformedShape(shapes.get(ii));
+      }
     }
     return sOut;
   }
@@ -413,7 +415,11 @@ public class DXFReader {
     } else {
       DXFReader dxf = new DXFReader();
       Shape[] shapes = dxf.parseFile(new File(args[0]), 10.0);
-      new DXFViewer(shapes);
+      if (shapes.length > 0) {
+        new DXFViewer(shapes);
+      } else {
+        System.out.println("No shapes found in file");
+      }
     }
   }
 }
