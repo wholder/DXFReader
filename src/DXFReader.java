@@ -46,6 +46,7 @@ public class DXFReader {
   private ArrayList<Entity>   stack = new ArrayList<>();
   private Map<String,String>  hVariables;                 // Map of Header Variables
   private Entity              cEntity = null;
+  private ArrayList<Entity>   closers = new  ArrayList<>();
   private boolean             DEBUG = false;
 
   static class Entity {
@@ -93,7 +94,7 @@ public class DXFReader {
     Path2D.Double     path = new Path2D.Double();
     List<Vertex>      points;
     private boolean   firstPoint = true;
-    private boolean   closePath;
+    private boolean   close, closed;
 
     Polyline (String type) {
       super(type);
@@ -103,7 +104,7 @@ public class DXFReader {
     void addParm (int gCode, String value) {
       if (gCode == 70) {
         int flags = Integer.parseInt(value);
-        closePath = (flags & 1) != 0;
+        close = (flags & 1) != 0;
       }
     }
 
@@ -127,8 +128,9 @@ public class DXFReader {
           path.lineTo(vertex.xx, vertex.yy);
         }
       }
-      if (closePath) {
+      if (close && !closed) {
         path.closePath();
+        closed = true;
       }
     }
   }
@@ -139,7 +141,7 @@ public class DXFReader {
     private double        xCp, yCp;
     private boolean       hasXcp, hasYcp;
     private boolean       firstPoint = true;
-    private boolean       closed;
+    private boolean       close, closed;
 
     LwPolyline (String type) {
       super(type);
@@ -158,7 +160,7 @@ public class DXFReader {
         break;
       case 70:
         int flags = Integer.parseInt(value);
-        closed = (flags & 0x01) != 0;
+        close = (flags & 0x01) != 0;
         break;
       }
       if (hasXcp && hasYcp) {
@@ -175,8 +177,9 @@ public class DXFReader {
 
     @Override
     void close () {
-      if (closed) {
+      if (close && !closed) {
         path.closePath();
+        closed = true;
       }
     }
   }
@@ -364,12 +367,14 @@ public class DXFReader {
         case "LWPOLYLINE":
           push();
           LwPolyline lwPoly = new LwPolyline(value);
+          closers.add(lwPoly);
           shapes.add(lwPoly.path);
           addChildToTop(cEntity = lwPoly);
           break;
         case "POLYLINE":
           push();
           Polyline poly = new Polyline(value);
+          closers.add(poly);
           shapes.add(poly.path);
           addChildToTop(cEntity = poly);
           break;
@@ -407,6 +412,9 @@ public class DXFReader {
         }
         break;
       }
+    }
+    for (Entity entity : closers) {
+      entity.close();
     }
     Shape[] sOut = new Shape[shapes.size()];
     if (shapes.size() > 0) {
