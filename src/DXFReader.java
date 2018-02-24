@@ -48,8 +48,10 @@ public class DXFReader {
   private Entity              cEntity = null;
   private ArrayList<Entity>   closers = new  ArrayList<>();
   private boolean             DEBUG = false;
+  private Header              header;
+  private double              uScale;
 
-  static class Entity {
+  class Entity {
     private String        type;
 
     Entity (String type) {
@@ -70,7 +72,7 @@ public class DXFReader {
     void close () { }
   }
 
-  static class Header extends Entity {
+  class Header extends Entity {
     private Map<String,String>  variables = new TreeMap<>();
     private String              vName;
 
@@ -87,10 +89,77 @@ public class DXFReader {
       if (gCode == 9) {
         vName = value;
       }
+      if (gCode == 70) {
+        switch (Integer.parseInt(value)) {
+        case 0:             // Unitless (assume inches)
+          uScale = 1.0;
+          break;
+        case 1:             // Inches
+          uScale = 1.0;
+          break;
+        case 2:             // Feet
+          uScale = 1.0/12;
+          break;
+        case 3:             // Miles
+          uScale = 63360.0;
+          break;
+        case 4:             // millimeters
+          uScale = 0.039370078740157;
+          break;
+        case 5:             // centimeters
+          uScale = 0.39370078740157;
+          break;
+        case 6:             // meters
+          uScale = 39.370078740157;
+          break;
+        case 7:             // kilometers
+          uScale = 39370.078740157;
+          break;
+        case 8:             // microinches
+          uScale = 0.000001;
+          break;
+        case 9:             // mils
+          uScale = 0.001;
+          break;
+        case 10:            // yards
+          uScale = 36.0;
+          break;
+        case 11:            // angstroms
+          uScale = 3.9370078740157e-9;
+          break;
+        case 12:            // nanometers
+          uScale = 3.9370078740157e-8;
+          break;
+        case 13:            // microns
+          uScale = 3.9370078740157e-5;
+          break;
+        case 14:            // decimeters
+          uScale = 3.9370078740157;
+          break;
+        case 15:            // decameters
+          uScale = 393.70078740157;
+          break;
+        case 16:            // hectometers
+          uScale = 3937.007878740157;
+          break;
+        case 17:            // gigameters
+          uScale = 39370078740.157;
+          break;
+        case 18:            // astronomical units
+          uScale = 5.89e+12;
+          break;
+        case 19:            // light years
+          uScale = 3.725e+17;
+          break;
+        case 20:            // parsecs
+          uScale = 1.215e+18;
+          break;
+        }
+      }
     }
   }
 
-  static class Polyline extends Entity {
+  class Polyline extends Entity {
     Path2D.Double     path = new Path2D.Double();
     List<Vertex>      points;
     private boolean   firstPoint = true;
@@ -135,7 +204,7 @@ public class DXFReader {
     }
   }
 
-  static class LwPolyline extends Entity {
+  class LwPolyline extends Entity {
     Path2D.Double         path = new Path2D.Double();
     List<Point2D.Double>  cPoints = new ArrayList<>();
     private double        xCp, yCp;
@@ -151,11 +220,11 @@ public class DXFReader {
     void addParm (int gCode, String value) {
       switch (gCode) {
       case 10:                              // Control Point X
-        xCp = Double.parseDouble(value);
+        xCp = Double.parseDouble(value) * uScale;
         hasXcp = true;
         break;
       case 20:                              // Control Point Y
-        yCp = Double.parseDouble(value);
+        yCp = Double.parseDouble(value) * uScale;
         hasYcp = true;
         break;
       case 70:
@@ -184,7 +253,7 @@ public class DXFReader {
     }
   }
 
-  static class Spline extends Entity {
+  class Spline extends Entity {
     Path2D.Double         path = new Path2D.Double();
     List<Point2D.Double>  cPoints = new ArrayList<>();
     private double        xCp, yCp;
@@ -200,11 +269,11 @@ public class DXFReader {
     void addParm (int gCode, String value) {
       switch (gCode) {
       case 10:                              // Control Point X
-        xCp = Double.parseDouble(value);
+        xCp = Double.parseDouble(value) * uScale;
         hasXcp = true;
         break;
       case 20:                              // Control Point Y
-        yCp = Double.parseDouble(value);
+        yCp = Double.parseDouble(value) * uScale;
         hasYcp = true;
         break;
       case 70:
@@ -261,7 +330,7 @@ public class DXFReader {
     }
   }
 
-  static class Vertex extends Entity {
+  class Vertex extends Entity {
     double xx, yy;
 
     Vertex (String type) {
@@ -270,10 +339,10 @@ public class DXFReader {
 
     @Override
     void addParm (int gCode, String value) {
-      if (gCode == 10){
-        xx = Double.parseDouble(value);
+      if (gCode == 10) {
+        xx = Double.parseDouble(value) * uScale;
       } else if (gCode == 20) {
-        yy = Double.parseDouble(value);
+        yy = Double.parseDouble(value) * uScale;
       }
     }
   }
@@ -397,7 +466,7 @@ public class DXFReader {
       case 2:                             // Entity Name
         if (cEntity != null) {
           if ("HEADER".equals(value)) {
-            cEntity = new Header(value);
+            cEntity = header = new Header(value);
           } else {
             cEntity.setType(value);
           }
@@ -424,7 +493,7 @@ public class DXFReader {
       }
       double scale = 1;
       double maxAxis = Math.max(bounds.getWidth(), bounds.getHeight());
-      // Limit size to 10 inches on max dimension
+      // Limit size to maxSize inches on max dimension
       if (maxAxis > maxSize) {
         scale = maxSize / maxAxis;
       }
@@ -447,7 +516,7 @@ public class DXFReader {
    * Simple DXF Viewer to test the Parser
    */
 
-  static class DXFViewer extends JFrame {
+  static class DXFViewer extends JPanel {
     private final double SCREEN_PPI = java.awt.Toolkit.getDefaultToolkit().getScreenResolution();
     private Shape[]      shapes;
     private double       border = 0.125;
@@ -461,12 +530,9 @@ public class DXFReader {
       }
       if (bounds != null) {
         int wid = (int) Math.round((bounds.getWidth() + border * 2) * SCREEN_PPI);
-        int hyt = (int) Math.round((bounds.getHeight() + border * 2) * SCREEN_PPI);
-        setSize(Math.max(wid, 640), Math.max(hyt, 400));
+        int hyt = (int) Math.round((bounds.getHeight() + border * 4) * SCREEN_PPI);   // Hmm.. why * 4 needed?
+        setSize(new Dimension(Math.max(wid, 640), Math.max(hyt, 400)));
       }
-      setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
-      setResizable(false);
-      setVisible(true);
     }
 
     public void paint (Graphics g) {
@@ -484,17 +550,23 @@ public class DXFReader {
       }
       g2.drawString("Paths: " + shapes.length, 20, 40);
     }
-
   }
 
   public static void main (String[] args) throws Exception {
     if (args.length < 1) {
       System.out.println("Usage: java -jar DXFReader.jar <dxf file>");
     } else {
+      JFrame frame = new JFrame();
+      frame.setLayout(new BorderLayout());
       DXFReader dxf = new DXFReader();
-      Shape[] shapes = dxf.parseFile(new File(args[0]), 10.0);
+      Shape[] shapes = dxf.parseFile(new File(args[0]), 24.0);
       if (shapes.length > 0) {
-        new DXFViewer(shapes);
+        DXFViewer viewer = new DXFViewer(shapes);
+        frame.setSize(viewer.getSize());
+        frame.add(viewer, BorderLayout.CENTER);
+        frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+        //frame.setResizable(false);
+        frame.setVisible(true);
       } else {
         System.out.println("No shapes found in file");
       }
