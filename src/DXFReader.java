@@ -7,6 +7,7 @@ import java.awt.geom.Rectangle2D;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.text.DecimalFormat;
 import java.util.*;
 import java.util.List;
 
@@ -43,13 +44,17 @@ import java.util.List;
    */
 
 public class DXFReader {
-  private ArrayList<Entity>   stack = new ArrayList<>();
-  private Map<String,String>  hVariables;                 // Map of Header Variables
-  private Entity              cEntity = null;
-  private ArrayList<Entity>   closers = new  ArrayList<>();
-  private boolean             DEBUG = false;
-  private Header              header;
-  private double              uScale;
+  private static DecimalFormat  df = new DecimalFormat("#0.0#");
+  private static boolean        DEBUG = false;
+  private static boolean        INFO = true;
+  private ArrayList<Entity>     stack = new ArrayList<>();
+  private Map<String,String>    hVariables;                 // Map of Header Variables
+  private Entity                cEntity = null;
+  private ArrayList<Entity>     closers = new  ArrayList<>();
+  private Rectangle2D           bounds;
+  private double                uScale = 0.039370078740157; // default to millimeters as units
+  private String                units = "unknown";
+  private boolean               scaled;
 
   class Entity {
     private String        type;
@@ -80,6 +85,98 @@ public class DXFReader {
       super(type);
     }
 
+    void close () {
+      String val = variables.get("$INSUNITS");
+      if (val != null) {
+        switch (Integer.parseInt(val)) {
+        case 0:             // unitless (assume millimeters)
+          uScale = 0.039370078740157;
+          units = "unitless";
+          break;
+        case 1:             // inches
+          uScale = 1.0;
+          units = "inches";
+          break;
+        case 2:             // feet
+          uScale = 1.0/12;
+          units = "feet";
+          break;
+        case 3:             // miles
+          uScale = 63360.0;
+          units = "miles";
+          break;
+        case 4:             // millimeters
+          uScale = 0.039370078740157;
+          units = "millimeters";
+          break;
+        case 5:             // centimeters
+          uScale = 0.39370078740157;
+          units = "centimeters";
+          break;
+        case 6:             // meters
+          uScale = 39.370078740157;
+          units = "meters";
+          break;
+        case 7:             // kilometers
+          uScale = 39370.078740157;
+          units = "kilometers";
+          break;
+        case 8:             // microinches
+          uScale = 0.000001;
+          units = "microinches";
+          break;
+        case 9:             // mils
+          uScale = 0.001;
+          units = "mils";
+          break;
+        case 10:            // yards
+          uScale = 36.0;
+          units = "yards";
+          break;
+        case 11:            // angstroms
+          uScale = 3.9370078740157e-9;
+          units = "angstroms";
+          break;
+        case 12:            // nanometers
+          uScale = 3.9370078740157e-8;
+          units = "nanometers";
+          break;
+        case 13:            // microns
+          uScale = 3.9370078740157e-5;
+          units = "microns";
+          break;
+        case 14:            // decimeters
+          uScale = 3.9370078740157;
+          units = "decimeters";
+          break;
+        case 15:            // decameters
+          uScale = 393.70078740157;
+          units = "decameters";
+          break;
+        case 16:            // hectometers
+          uScale = 3937.007878740157;
+          units = "hectometers";
+          break;
+        case 17:            // gigameters
+          uScale = 39370078740.157;
+          units = "gigameters";
+          break;
+        case 18:            // astronomical units
+          uScale = 5.89e+12;
+          units = "astronomical units";
+          break;
+        case 19:            // light years
+          uScale = 3.725e+17;
+          units = "light years";
+          break;
+        case 20:            // parsecs
+          uScale = 1.215e+18;
+          units = "parsecs";
+          break;
+        }
+      }
+    }
+
     @Override
     void addParm (int gCode, String value) {
       if (vName != null) {
@@ -88,73 +185,6 @@ public class DXFReader {
       }
       if (gCode == 9) {
         vName = value;
-      }
-      if (gCode == 70) {
-        switch (Integer.parseInt(value)) {
-        case 0:             // Unitless (assume inches)
-          uScale = 1.0;
-          break;
-        case 1:             // Inches
-          uScale = 1.0;
-          break;
-        case 2:             // Feet
-          uScale = 1.0/12;
-          break;
-        case 3:             // Miles
-          uScale = 63360.0;
-          break;
-        case 4:             // millimeters
-          uScale = 0.039370078740157;
-          break;
-        case 5:             // centimeters
-          uScale = 0.39370078740157;
-          break;
-        case 6:             // meters
-          uScale = 39.370078740157;
-          break;
-        case 7:             // kilometers
-          uScale = 39370.078740157;
-          break;
-        case 8:             // microinches
-          uScale = 0.000001;
-          break;
-        case 9:             // mils
-          uScale = 0.001;
-          break;
-        case 10:            // yards
-          uScale = 36.0;
-          break;
-        case 11:            // angstroms
-          uScale = 3.9370078740157e-9;
-          break;
-        case 12:            // nanometers
-          uScale = 3.9370078740157e-8;
-          break;
-        case 13:            // microns
-          uScale = 3.9370078740157e-5;
-          break;
-        case 14:            // decimeters
-          uScale = 3.9370078740157;
-          break;
-        case 15:            // decameters
-          uScale = 393.70078740157;
-          break;
-        case 16:            // hectometers
-          uScale = 3937.007878740157;
-          break;
-        case 17:            // gigameters
-          uScale = 39370078740.157;
-          break;
-        case 18:            // astronomical units
-          uScale = 5.89e+12;
-          break;
-        case 19:            // light years
-          uScale = 3.725e+17;
-          break;
-        case 20:            // parsecs
-          uScale = 1.215e+18;
-          break;
-        }
       }
     }
   }
@@ -466,7 +496,7 @@ public class DXFReader {
       case 2:                             // Entity Name
         if (cEntity != null) {
           if ("HEADER".equals(value)) {
-            cEntity = header = new Header(value);
+            cEntity = new Header(value);
           } else {
             cEntity.setType(value);
           }
@@ -487,7 +517,6 @@ public class DXFReader {
     }
     Shape[] sOut = new Shape[shapes.size()];
     if (shapes.size() > 0) {
-      Rectangle2D bounds = null;
       for (Shape shape : shapes) {
         bounds = bounds == null ? shape.getBounds2D() : bounds.createUnion(shape.getBounds2D());
       }
@@ -496,6 +525,7 @@ public class DXFReader {
       // Limit size to maxSize inches on max dimension
       if (maxAxis > maxSize) {
         scale = maxSize / maxAxis;
+        scaled = true;
       }
       // Scale, as needed, and flip Y axis
       AffineTransform at = new AffineTransform();
@@ -517,21 +547,38 @@ public class DXFReader {
    */
 
   static class DXFViewer extends JPanel {
-    private final double SCREEN_PPI = java.awt.Toolkit.getDefaultToolkit().getScreenResolution();
-    private Shape[]      shapes;
-    private double       border = 0.125;
+    private DecimalFormat df = new DecimalFormat("#0.0#");
+    private final double  SCREEN_PPI = java.awt.Toolkit.getDefaultToolkit().getScreenResolution();
+    private Shape[]       shapes;
+    private double        border = 0.125;
+    private DXFReader     dxf;
+    private Rectangle2D   bounds;
 
-    DXFViewer (Shape[] shapes) {
-      this.shapes = shapes;
-      Rectangle2D bounds = null;
-      // Create a bounding box that's the union of all shapes in the shapes array
-      for (Shape shape : shapes) {
-        bounds = bounds == null ? shape.getBounds2D() : bounds.createUnion(shape.getBounds2D());
-      }
-      if (bounds != null) {
-        int wid = (int) Math.round((bounds.getWidth() + border * 2) * SCREEN_PPI);
-        int hyt = (int) Math.round((bounds.getHeight() + border * 4) * SCREEN_PPI);   // Hmm.. why * 4 needed?
-        setSize(new Dimension(Math.max(wid, 640), Math.max(hyt, 400)));
+    DXFViewer (String fileName) throws IOException {
+      dxf = new DXFReader();
+      shapes = dxf.parseFile(new File(fileName), 14.0);
+      if (shapes.length > 0) {
+        // Create a bounding box that's the union of all shapes in the shapes array
+        for (Shape shape : shapes) {
+          bounds = bounds == null ? shape.getBounds2D() : bounds.createUnion(shape.getBounds2D());
+        }
+        if (bounds != null) {
+          int wid = (int) Math.round((bounds.getWidth() + border * 2) * SCREEN_PPI);
+          int hyt = (int) Math.round((bounds.getHeight() + border * 4) * SCREEN_PPI);   // Hmm.. why * 4 needed?
+          setSize(new Dimension(Math.max(wid, 640), Math.max(hyt, 400)));
+        }
+        JFrame frame = new JFrame();
+        frame.setTitle(fileName +
+          " - Width:  " + df.format(dxf.bounds.getWidth()) + " " + dxf.units +
+          ", Height: " + df.format(dxf.bounds.getHeight()) + " " + dxf.units);
+        frame.setLayout(new BorderLayout());
+        frame.setSize(getSize());
+        frame.add(this, BorderLayout.CENTER);
+        frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+        //frame.setResizable(false);
+        frame.setVisible(true);
+      } else {
+        throw new IllegalStateException("No shapes found in file: " + fileName);
       }
     }
 
@@ -548,7 +595,19 @@ public class DXFReader {
       for (Shape shape : shapes) {
         g2.draw(atScale.createTransformedShape(shape));
       }
-      g2.drawString("Paths: " + shapes.length, 20, 40);
+      if (INFO) {
+        int yOff = 30;
+        g2.setFont(new Font("Monaco", Font.PLAIN, 12));
+        g2.drawString("Paths:      " + shapes.length, 20, yOff);
+        yOff += 15;
+        g2.drawString("Original:   " + df.format(dxf.bounds.getWidth()) + " x " + df.format(dxf.bounds.getHeight()) + " inches", 20, yOff);
+        yOff += 15;
+        g2.drawString("Orig Units: " + dxf.units, 20, yOff);
+        yOff += 15;
+        if (dxf.scaled) {
+          g2.drawString("Scaled To: " + df.format(bounds.getWidth()) + " x " + df.format(bounds.getHeight()) + " inches", 20, 60);
+        }
+      }
     }
   }
 
@@ -556,20 +615,7 @@ public class DXFReader {
     if (args.length < 1) {
       System.out.println("Usage: java -jar DXFReader.jar <dxf file>");
     } else {
-      JFrame frame = new JFrame();
-      frame.setLayout(new BorderLayout());
-      DXFReader dxf = new DXFReader();
-      Shape[] shapes = dxf.parseFile(new File(args[0]), 24.0);
-      if (shapes.length > 0) {
-        DXFViewer viewer = new DXFViewer(shapes);
-        frame.setSize(viewer.getSize());
-        frame.add(viewer, BorderLayout.CENTER);
-        frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
-        //frame.setResizable(false);
-        frame.setVisible(true);
-      } else {
-        System.out.println("No shapes found in file");
-      }
+      DXFViewer viewer = new DXFViewer(args[0]);
     }
   }
 }
