@@ -44,7 +44,6 @@ import java.util.List;
    */
 
 public class DXFReader {
-  private static DecimalFormat  df = new DecimalFormat("#0.0#");
   private static boolean        DEBUG = false;
   private static boolean        INFO = true;
   private ArrayList<Entity>     stack = new ArrayList<>();
@@ -605,7 +604,7 @@ public class DXFReader {
         g2.drawString("Orig Units: " + dxf.units, 20, yOff);
         yOff += 15;
         if (dxf.scaled) {
-          g2.drawString("Scaled To: " + df.format(bounds.getWidth()) + " x " + df.format(bounds.getHeight()) + " inches", 20, 60);
+          g2.drawString("Scaled To: " + df.format(bounds.getWidth()) + " x " + df.format(bounds.getHeight()) + " inches", 20, yOff);
         }
       }
     }
