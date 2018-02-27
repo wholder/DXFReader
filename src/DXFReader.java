@@ -204,6 +204,9 @@ public class DXFReader {
         int flags = Integer.parseInt(value);
         close = (flags & 1) != 0;
       }
+      if (gCode == 42) {
+        // Need code here to handle bulge attribute, but need example DXF file, first
+      }
       return false;
     }
 
@@ -281,9 +284,7 @@ public class DXFReader {
           } else {
             path.lineTo(lastX = xCp, lastY = yCp);
           }
-          if (--vertices == 0) {
-            return true;
-          }
+          return --vertices == 0;
         }
       }
       return false;
@@ -495,7 +496,7 @@ public class DXFReader {
     System.out.println(value);
   }
 
-  Shape[] parseFile (File file, double maxSize) throws IOException {
+  Shape[] parseFile (File file, double maxSize, double minSize) throws IOException {
     stack = new ArrayList<>();
     hVariables = null;
     ArrayList<Shape> shapes = new ArrayList<>();
@@ -623,8 +624,13 @@ public class DXFReader {
       double scale = 1;
       double maxAxis = Math.max(bounds.getWidth(), bounds.getHeight());
       // Limit size to maxSize inches on max dimension
-      if (maxAxis > maxSize) {
+      if (maxSize > 0 && maxAxis > maxSize) {
         scale = maxSize / maxAxis;
+        scaled = true;
+      }
+      // If minSize specified, scale up max dimension to match
+      if (minSize > 0 && maxAxis < minSize) {
+        scale = minSize / maxAxis;
         scaled = true;
       }
       // Scale, as needed, and flip Y axis
@@ -654,9 +660,9 @@ public class DXFReader {
     private DXFReader     dxf;
     private Rectangle2D   bounds;
 
-    DXFViewer (String fileName) throws IOException {
+    DXFViewer (String fileName, double maxSize, double minSize) throws IOException {
       dxf = new DXFReader();
-      shapes = dxf.parseFile(new File(fileName), 14.0);
+      shapes = dxf.parseFile(new File(fileName), maxSize, minSize);
       if (shapes.length > 0) {
         // Create a bounding box that's the union of all shapes in the shapes array
         for (Shape shape : shapes) {
@@ -668,14 +674,11 @@ public class DXFReader {
           setSize(new Dimension(Math.max(wid, 640), Math.max(hyt, 400)));
         }
         JFrame frame = new JFrame();
-        frame.setTitle(fileName +
-          " - Width:  " + df.format(dxf.bounds.getWidth()) + " " + dxf.units +
-          ", Height: " + df.format(dxf.bounds.getHeight()) + " " + dxf.units);
-        frame.setLayout(new BorderLayout());
+        frame.setTitle(fileName);
         frame.setSize(getSize());
         frame.add(this, BorderLayout.CENTER);
         frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
-        //frame.setResizable(false);
+        frame.setResizable(false);
         frame.setVisible(true);
       } else {
         throw new IllegalStateException("No shapes found in file: " + fileName);
@@ -688,10 +691,10 @@ public class DXFReader {
       g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
       g2.setBackground(getBackground());
       g2.clearRect(0, 0, d.width, d.height);
-      g2.setColor(Color.black);
       AffineTransform atScale = new AffineTransform();
       atScale.translate(border * SCREEN_PPI, border * SCREEN_PPI);
       atScale.scale(SCREEN_PPI, SCREEN_PPI);
+      g2.setColor(Color.black);
       for (Shape shape : shapes) {
         g2.draw(atScale.createTransformedShape(shape));
       }
@@ -715,7 +718,7 @@ public class DXFReader {
     if (args.length < 1) {
       System.out.println("Usage: java -jar DXFReader.jar <dxf file>");
     } else {
-      DXFViewer viewer = new DXFViewer(args[0]);
+      DXFViewer viewer = new DXFViewer(args[0], 14.0, 0);
     }
   }
 }
