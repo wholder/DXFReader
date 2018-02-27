@@ -191,6 +191,7 @@ public class DXFReader {
   class Polyline extends Entity {
     Path2D.Double     path = new Path2D.Double();
     List<Vertex>      points;
+    private double    firstX, firstY, lastX, lastY;
     private boolean   firstPoint = true;
     private boolean   close, closed;
 
@@ -203,9 +204,6 @@ public class DXFReader {
       if (gCode == 70) {
         int flags = Integer.parseInt(value);
         close = (flags & 1) != 0;
-      }
-      if (gCode == 42) {
-        // Need code here to handle bulge attribute, but need example DXF file, first
       }
       return false;
     }
@@ -222,18 +220,54 @@ public class DXFReader {
 
     @Override
     void close () {
+      double bulge = 0.0;
       for (Vertex vertex : points) {
         if (firstPoint) {
           firstPoint = false;
-          path.moveTo(vertex.xx, vertex.yy);
+          path.moveTo(firstX = lastX = vertex.xx, firstY = lastY = vertex.yy);
         } else {
-          path.lineTo(vertex.xx, vertex.yy);
+          if (bulge != 0) {
+            path.append(getArcBulge(new Point2D.Double(lastX, lastY), new Point2D.Double(vertex.xx, vertex.yy), bulge), true);
+            lastX = vertex.xx;
+            lastY = vertex.yy;
+          } else {
+            path.lineTo(lastX = vertex.xx, lastY = vertex.yy);
+          }
         }
+        bulge = vertex.bulge;
       }
       if (close && !closed) {
-        path.closePath();
+        if (bulge != 0) {
+          path.append(getArcBulge(new Point2D.Double(lastX, lastY), new Point2D.Double(firstX, firstY), bulge), true);
+        } else {
+          path.closePath();
+        }
         closed = true;
       }
+    }
+  }
+
+  class Vertex extends Entity {
+    double xx, yy, bulge;
+
+    Vertex (String type) {
+      super(type);
+    }
+
+    @Override
+    boolean addParm (int gCode, String value) {
+      switch (gCode) {
+      case 10:                                    // Vertex X
+        xx = Double.parseDouble(value) * uScale;
+        break;
+      case 20:                                    // Vertex Y
+        yy = Double.parseDouble(value) * uScale;
+        break;
+      case 42:                                    // Vertex Bulge factor
+        bulge =  Double.parseDouble(value);
+        break;
+      }
+      return false;
     }
   }
 
@@ -275,7 +309,7 @@ public class DXFReader {
       if (hasXcp && hasYcp) {
         hasXcp = hasYcp = false;
         if (bulge != 0) {
-          addBulge(lastX, lastY, xCp, yCp);
+          path.append(getArcBulge(new Point2D.Double(lastX, lastY), new Point2D.Double(xCp, yCp), bulge), true);
           bulge = 0;
         } else {
           if (firstPoint) {
@@ -290,41 +324,11 @@ public class DXFReader {
       return false;
     }
 
-    // Draw bulge from p1x,p2y to p2x,p2y
-    private void addBulge (double p1x, double p1y, double p2x, double p2y) {
-      path.append(getArcBulge(new Point2D.Double(p1x, p1y), new Point2D.Double(p2x, p2y), bulge), true);
-    }
-
-    /**
-     *  See: http://darrenirvine.blogspot.com/2015/08/polylines-radius-bulge-turnaround.html
-     * @param p1 Starting point for Arc
-     * @param p2 Ending point for Arc
-     * @param bulge bulge factor (bulge > 0 = clockwise, else counterclockwise)
-     * @return Arc2D.Double object
-     */
-    private Arc2D.Double getArcBulge (Point2D.Double p1, Point2D.Double p2, double bulge) {
-      Point2D.Double mp = new Point2D.Double((p2.x + p1.x) / 2, (p2.y + p1.y) / 2);
-      Point2D.Double bp = new Point2D.Double(mp.x - (p1.y - mp.y) * bulge, mp.y + (p1.x - mp.x) * bulge);
-      double u = p1.distance(p2);
-      double b = (2 * mp.distance(bp)) / u;
-      double radius = u * ((1 + b * b) / (4 * b));
-      double dx = mp.x - bp.x;
-      double dy = mp.y - bp.y;
-      double mag = Math.sqrt(dx * dx + dy * dy);
-      Point2D.Double cp = new Point2D.Double(bp.x + radius * (dx / mag), bp.y + radius * (dy / mag));
-      double startAngle = 180 - Math.toDegrees(Math.atan2(cp.y - p1.y, cp.x - p1.x));
-      double opp = u / 2;
-      double extent = Math.toDegrees(Math.asin(opp / radius)) * 2;
-      double extentAngle = bulge >= 0 ? -extent : extent;
-      Point2D.Double ul = new Point2D.Double(cp.x - radius, cp.y - radius);
-      return new Arc2D.Double(ul.x, ul.y, radius * 2, radius * 2, startAngle, extentAngle, Arc2D.OPEN);
-    }
-
     @Override
     void close () {
       if (close && !closed) {
         if (bulge != 0) {
-          addBulge(lastX, lastY, firstX, firstY);
+          path.append(getArcBulge(new Point2D.Double(lastX, lastY), new Point2D.Double(firstX, firstY), bulge), true);
           bulge = 0;
         } else {
           path.closePath();
@@ -388,19 +392,19 @@ public class DXFReader {
     @Override
     boolean addParm (int gCode, String value) {
       switch (gCode) {
-      case 10:                              // Control Point X
+      case 10:                                    // Control Point X
         xCp = Double.parseDouble(value) * uScale;
         hasXcp = true;
         break;
-      case 20:                              // Control Point Y
+      case 20:                                    // Control Point Y
         yCp = Double.parseDouble(value) * uScale;
         hasYcp = true;
         break;
-      case 70:
+      case 70:                                    // Flags
         int flags = Integer.parseInt(value);
         closed = (flags & 0x01) != 0;
         break;
-      case 73:
+      case 73:                                    // Number of Control Points
         numCPs = Integer.parseInt(value);
         break;
       }
@@ -451,22 +455,30 @@ public class DXFReader {
     }
   }
 
-  class Vertex extends Entity {
-    double xx, yy;
 
-    Vertex (String type) {
-      super(type);
-    }
-
-    @Override
-    boolean addParm (int gCode, String value) {
-      if (gCode == 10) {
-        xx = Double.parseDouble(value) * uScale;
-      } else if (gCode == 20) {
-        yy = Double.parseDouble(value) * uScale;
-      }
-      return false;
-    }
+  /**
+   *  See: http://darrenirvine.blogspot.com/2015/08/polylines-radius-bulge-turnaround.html
+   * @param p1 Starting point for Arc
+   * @param p2 Ending point for Arc
+   * @param bulge bulge factor (bulge > 0 = clockwise, else counterclockwise)
+   * @return Arc2D.Double object
+   */
+  private Arc2D.Double getArcBulge (Point2D.Double p1, Point2D.Double p2, double bulge) {
+    Point2D.Double mp = new Point2D.Double((p2.x + p1.x) / 2, (p2.y + p1.y) / 2);
+    Point2D.Double bp = new Point2D.Double(mp.x - (p1.y - mp.y) * bulge, mp.y + (p1.x - mp.x) * bulge);
+    double u = p1.distance(p2);
+    double b = (2 * mp.distance(bp)) / u;
+    double radius = u * ((1 + b * b) / (4 * b));
+    double dx = mp.x - bp.x;
+    double dy = mp.y - bp.y;
+    double mag = Math.sqrt(dx * dx + dy * dy);
+    Point2D.Double cp = new Point2D.Double(bp.x + radius * (dx / mag), bp.y + radius * (dy / mag));
+    double startAngle = 180 - Math.toDegrees(Math.atan2(cp.y - p1.y, cp.x - p1.x));
+    double opp = u / 2;
+    double extent = Math.toDegrees(Math.asin(opp / radius)) * 2;
+    double extentAngle = bulge >= 0 ? -extent : extent;
+    Point2D.Double ul = new Point2D.Double(cp.x - radius, cp.y - radius);
+    return new Arc2D.Double(ul.x, ul.y, radius * 2, radius * 2, startAngle, extentAngle, Arc2D.OPEN);
   }
 
   private void push () {
