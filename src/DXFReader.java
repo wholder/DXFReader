@@ -327,7 +327,7 @@ public class DXFReader {
     @Override
     void close () {
       if (close && !closed) {
-        if (bulge != 0) {
+        if (bulge != 0 && lastX != firstX && lastY != firstY) {
           path.append(getArcBulge(new Point2D.Double(lastX, lastY), new Point2D.Double(firstX, firstY), bulge), true);
           bulge = 0;
         } else {
@@ -553,7 +553,7 @@ public class DXFReader {
           }
           break;
         case "SPLINE":
-          if ("BLOCK".equals(cEntity.type)) {
+          if (cEntity != null && "BLOCK".equals(cEntity.type)) {
             push();
           }
           Spline spline = new Spline(value);
@@ -562,7 +562,7 @@ public class DXFReader {
           break;
         case "HATCH":
         case "INSERT":
-          if ("BLOCK".equals(cEntity.type)) {
+          if (cEntity != null && "BLOCK".equals(cEntity.type)) {
             push();
           }
           addChildToTop(cEntity = new Entity(value));
@@ -730,7 +730,7 @@ public class DXFReader {
     if (args.length < 1) {
       System.out.println("Usage: java -jar DXFReader.jar <dxf file>");
     } else {
-      DXFViewer viewer = new DXFViewer(args[0], 14.0, 0);
+      DXFViewer viewer = new DXFViewer(args[0], 14.0, 12.0);
     }
   }
 }
