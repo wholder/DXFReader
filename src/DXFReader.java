@@ -257,6 +257,9 @@ public class DXFReader {
 
     @Override
     Shape getShape () {
+      if (xScale >= 0) {
+        rotation = -rotation;
+      }
       Block block = blockDict.get(blockHandle);
       if ("zd".equals(blockHandle)) {
         int dum = 0;
