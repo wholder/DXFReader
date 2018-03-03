@@ -8,49 +8,51 @@ import java.text.DecimalFormat;
 import java.util.*;
 import java.util.List;
 
-  /*
-   *  This code implements a simple DXF file parser that can read many 2D DXF files containing POLYLINE and SPLINE
-   *  outlines such as thoes used for embroidery patterns and input to machines like Silhouette paper cutters.
-   *  It's designed to convert POLYLINE and SPLINE sequences into an array of Path2D.Double objects from Java's
-   *  geom package.  The parser assumes that DXF file's units are inches, but you can pass the parser a maximum
-   *  size value and it will scale down the converted shape so that its maximum dimension fits within this limit.
-   *  The code also contains a simple viewer app you can run to try it out on a DXF file.  From the command line
-   *  type:
-   *          java -jar DXFReader.jar file.dxf
-   *
-   *  I've tested this code with a variety of simple, 2D DXF files and it's able to read most of them.  However,
-   *  the DXF file specification is very complex and I have only implemented a subset of it, so I cannot guarantee
-   *  that this code will read all 2D DXF files.
-   *
-   *  I'm publishing this source code under the MIT License (See: https://opensource.org/licenses/MIT)
-   *
-   *  Copyright 2017 Wayne Holder
-   *
-   *  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
-   *  documentation files (the "Software"), to deal in the Software without restriction, including without limitation
-   *  the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
-   *  to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-   *
-   *  The above copyright notice and this permission notice shall be included in all copies or substantial portions of
-   *  the Software.
-   *
-   *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-   *  THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-   *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-   *  TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-   */
+/*
+ *  This code implements a simple DXF file parser that can read many 2D DXF files containing POLYLINE and SPLINE
+ *  outlines such as thoes used for embroidery patterns and input to machines like Silhouette paper cutters.
+ *  It's designed to convert POLYLINE and SPLINE sequences into an array of Path2D.Double objects from Java's
+ *  geom package.  The parser assumes that DXF file's units are inches, but you can pass the parser a maximum
+ *  size value and it will scale down the converted shape so that its maximum dimension fits within this limit.
+ *  The code also contains a simple viewer app you can run to try it out on a DXF file.  From the command line
+ *  type:
+ *          java -jar DXFReader.jar file.dxf
+ *
+ *  I've tested this code with a variety of simple, 2D DXF files and it's able to read most of them.  However,
+ *  the DXF file specification is very complex and I have only implemented a subset of it, so I cannot guarantee
+ *  that this code will read all 2D DXF files.
+ *
+ *  I'm publishing this source code under the MIT License (See: https://opensource.org/licenses/MIT)
+ *
+ *  Copyright 2017 Wayne Holder
+ *
+ *  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+ *  documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+ *  the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
+ *  to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+ *
+ *  The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+ *  the Software.
+ *
+ *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+ *  THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ *  TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
 
 public class DXFReader {
   private static boolean        DEBUG = false;
   private static boolean        INFO = false;
+  private ArrayList<Entity>     entities = new ArrayList<>();
   private ArrayList<Entity>     stack = new ArrayList<>();
-  private Map<String,String>    hVariables;                 // Map of Header Variables
+  private Map<String,Block>     blockDict = new HashMap<>();
   private Entity                cEntity = null;
-  private ArrayList<Entity>     closers = new  ArrayList<>();
   private Rectangle2D           bounds;
   private double                uScale = 0.039370078740157; // default to millimeters as units
   private String                units = "unknown";
   private boolean               scaled;
+
+  interface AutoPop {}
 
   class Entity {
     private String        type;
@@ -59,132 +61,403 @@ public class DXFReader {
       this.type = type;
     }
 
-    void setType (String type) {
-      if (this.type == null) {
-        this.type = type;
-      }
-    }
-
     // Override these methods is subclasses, as needed
-    boolean addParm (int gCode, String value) {
-      return false;
-    }
+    void addParm (int gCode, String value) { }
 
     void addChild (Entity child) { }
+
+    Shape getShape () {
+      return null;
+    }
 
     void close () { }
   }
 
-  class Header extends Entity {
-    private Map<String,String>  variables = new TreeMap<>();
-    private String              vName;
+  class Section extends Entity {
+    private Map<String,Map<Integer,String>>  attributes = new TreeMap<>();
+    private Map<Integer,String>              attValues;
+    private String  sType;
 
-    Header (String type) {
+    Section (String type) {
       super(type);
     }
 
-    void close () {
-      String val = variables.get("$INSUNITS");
-      if (val != null) {
-        switch (Integer.parseInt(val)) {
-        case 0:             // unitless (assume millimeters)
-          uScale = 0.039370078740157;
-          units = "unitless";
-          break;
-        case 1:             // inches
-          uScale = 1.0;
-          units = "inches";
-          break;
-        case 2:             // feet
-          uScale = 1.0/12;
-          units = "feet";
-          break;
-        case 3:             // miles
-          uScale = 63360.0;
-          units = "miles";
-          break;
-        case 4:             // millimeters
-          uScale = 0.039370078740157;
-          units = "millimeters";
-          break;
-        case 5:             // centimeters
-          uScale = 0.39370078740157;
-          units = "centimeters";
-          break;
-        case 6:             // meters
-          uScale = 39.370078740157;
-          units = "meters";
-          break;
-        case 7:             // kilometers
-          uScale = 39370.078740157;
-          units = "kilometers";
-          break;
-        case 8:             // microinches
-          uScale = 0.000001;
-          units = "microinches";
-          break;
-        case 9:             // mils
-          uScale = 0.001;
-          units = "mils";
-          break;
-        case 10:            // yards
-          uScale = 36.0;
-          units = "yards";
-          break;
-        case 11:            // angstroms
-          uScale = 3.9370078740157e-9;
-          units = "angstroms";
-          break;
-        case 12:            // nanometers
-          uScale = 3.9370078740157e-8;
-          units = "nanometers";
-          break;
-        case 13:            // microns
-          uScale = 3.9370078740157e-5;
-          units = "microns";
-          break;
-        case 14:            // decimeters
-          uScale = 3.9370078740157;
-          units = "decimeters";
-          break;
-        case 15:            // decameters
-          uScale = 393.70078740157;
-          units = "decameters";
-          break;
-        case 16:            // hectometers
-          uScale = 3937.007878740157;
-          units = "hectometers";
-          break;
-        case 17:            // gigameters
-          uScale = 39370078740.157;
-          units = "gigameters";
-          break;
-        case 18:            // astronomical units
-          uScale = 5.89e+12;
-          units = "astronomical units";
-          break;
-        case 19:            // light years
-          uScale = 3.725e+17;
-          units = "light years";
-          break;
-        case 20:            // parsecs
-          uScale = 1.215e+18;
-          units = "parsecs";
-          break;
-        }
+    @Override
+    void addParm (int gCode, String value) {
+      if (gCode == 2 && sType == null) {
+        sType = value;
+      } else if (gCode == 9) {
+        attValues = new HashMap<>();
+        attributes.put(value, attValues);
+      } else if (attValues != null) {
+        attValues.put(gCode, value);
+      }
+    }
+  }
+
+  private void setUnits (String val) {
+    if (val != null) {
+      switch (Integer.parseInt(val)) {
+      case 0:             // unitless (assume millimeters)
+        uScale = 0.039370078740157;
+        units = "unitless";
+        break;
+      case 1:             // inches
+        uScale = 1.0;
+        units = "inches";
+        break;
+      case 2:             // feet
+        uScale = 1.0/12;
+        units = "feet";
+        break;
+      case 3:             // miles
+        uScale = 63360.0;
+        units = "miles";
+        break;
+      case 4:             // millimeters
+        uScale = 0.039370078740157;
+        units = "millimeters";
+        break;
+      case 5:             // centimeters
+        uScale = 0.39370078740157;
+        units = "centimeters";
+        break;
+      case 6:             // meters
+        uScale = 39.370078740157;
+        units = "meters";
+        break;
+      case 7:             // kilometers
+        uScale = 39370.078740157;
+        units = "kilometers";
+        break;
+      case 8:             // microinches
+        uScale = 0.000001;
+        units = "microinches";
+        break;
+      case 9:             // mils
+        uScale = 0.001;
+        units = "mils";
+        break;
+      case 10:            // yards
+        uScale = 36.0;
+        units = "yards";
+        break;
+      case 11:            // angstroms
+        uScale = 3.9370078740157e-9;
+        units = "angstroms";
+        break;
+      case 12:            // nanometers
+        uScale = 3.9370078740157e-8;
+        units = "nanometers";
+        break;
+      case 13:            // microns
+        uScale = 3.9370078740157e-5;
+        units = "microns";
+        break;
+      case 14:            // decimeters
+        uScale = 3.9370078740157;
+        units = "decimeters";
+        break;
+      case 15:            // decameters
+        uScale = 393.70078740157;
+        units = "decameters";
+        break;
+      case 16:            // hectometers
+        uScale = 3937.007878740157;
+        units = "hectometers";
+        break;
+      case 17:            // gigameters
+        uScale = 39370078740.157;
+        units = "gigameters";
+        break;
+      case 18:            // astronomical units
+        uScale = 5.89e+12;
+        units = "astronomical units";
+        break;
+      case 19:            // light years
+        uScale = 3.725e+17;
+        units = "light years";
+        break;
+      case 20:            // parsecs
+        uScale = 1.215e+18;
+        units = "parsecs";
+        break;
+      }
+    }
+  }
+
+  class Block extends Entity {
+    private String        name, handle;
+    private List<Entity>  entities = new ArrayList<>();
+    private double        baseX, baseY;
+    private int           flags;
+
+    Block (String type) {
+      super(type);
+    }
+
+    @Override
+    void addParm (int gCode, String value) {
+      switch (gCode) {
+      case 1:
+        name = value;
+        break;
+      case 2:                                       // Block handle
+        handle = value;
+        blockDict.put(handle, this);
+        break;
+      case 10:                                      // Base Point X
+        baseX = Double.parseDouble(value) * uScale;
+        break;
+      case 20:                                      // Base Point Y
+        baseY = Double.parseDouble(value) * uScale;
+        break;
+      case 70:                                      // Flags
+        flags = Integer.parseInt(value);
+        break;
+      }
+    }
+
+    void addEntity (Entity entity) {
+      entities.add(entity);
+    }
+  }
+
+  class Insert extends Entity implements AutoPop {
+    private String    blockHandle;
+    private double    ix, iy, xScale = 1.0, yScale = 1.0, rotation;
+
+    Insert (String type) {
+      super(type);
+    }
+
+    @Override
+    void addParm (int gCode, String value) {
+      switch (gCode) {
+      case 2:                                     // Handle of Block to insert
+        blockHandle = value;
+        break;
+      case 10:                                    // Insertion X
+        ix = Double.parseDouble(value) * uScale;
+        break;
+      case 20:                                    // Insertion Y
+        iy = Double.parseDouble(value) * uScale;
+        break;
+      case 41:                                    // X scaling
+        xScale = Double.parseDouble(value);
+        break;
+      case 42:                                    // Y scaling
+        yScale = Double.parseDouble(value);
+        break;
+      case 50:                                    // Rotation angle (degrees)
+        rotation = Double.parseDouble(value);
+        break;
       }
     }
 
     @Override
-    boolean addParm (int gCode, String value) {
-      if (vName != null) {
-        variables.put(vName, value);
-        vName = null;
+    Shape getShape () {
+      Block block = blockDict.get(blockHandle);
+      if ("zd".equals(blockHandle)) {
+        int dum = 0;
       }
-      if (gCode == 9) {
-        vName = value;
+      if (block != null && block.entities.size() > 0) {
+        Path2D.Double path = new Path2D.Double();
+        for (Entity entity : block.entities) {
+          Shape shape = entity.getShape();
+          if (shape != null) {
+            if (ix != 0 || iy != 0 || xScale != 1.0 || yScale != 1.0 || rotation != 0) {
+              // TODO: get translation, scaling, etc. fully working
+              AffineTransform at = new AffineTransform();
+              at.translate(ix, iy);
+              at.scale(xScale, yScale);
+              at.rotate(Math.toRadians(-rotation));
+              shape = at.createTransformedShape(shape);
+            }
+            path.append(shape, false);
+          }
+        }
+        return path;
       }
-      return false;
+      return null;
+    }
+  }
+
+  /*
+   * Note: code for "DIMENSION" is incomplete
+   */
+  class Dimen extends Entity implements AutoPop {
+    private String    blockHandle;
+    private double    ax, ay, mx, my;
+    private int       type, orientation;
+
+    Dimen (String type) {
+      super(type);
+    }
+
+    @Override
+    void addParm (int gCode, String value) {
+      switch (gCode) {
+      case 2:                                     // Handle of Block to with Dimension graphics
+        blockHandle = value;
+        break;
+      case 10:                                    // Definition Point X
+        ax = Double.parseDouble(value) * uScale;
+        break;
+      case 20:                                    // Definition Point Y
+        ay = Double.parseDouble(value) * uScale;
+        break;
+      case 11:                                    // Mid Point X
+        mx = Double.parseDouble(value) * uScale;
+        break;
+      case 21:                                    // Mid Point Y
+        my = Double.parseDouble(value) * uScale;
+        break;
+      case 70:                                    // Dimension type (0-6 plus bits at 32,64,128)
+        type = Integer.parseInt(value);
+        break;
+      case 71:                                    // Attachment orientation (1-9) for 1=UL, 2=UC, 3=UR, etc
+        orientation = Integer.parseInt(value);
+        break;
+      }
+    }
+
+    @Override
+    Shape getShape () {
+      Block block = blockDict.get(blockHandle);
+      if (block != null && block.entities.size() > 0) {
+        Path2D.Double path = new Path2D.Double();
+        for (Entity entity : block.entities) {
+          Shape shape = entity.getShape();
+          if (shape != null) {
+            path.append(shape, false);
+          }
+        }
+        // Draw 'X' as placeholder for MTEXT at definition midpoint
+        double tenth = 1 * uScale;
+        path.moveTo(mx - tenth, my - tenth);
+        path.lineTo(mx + tenth, my + tenth);
+        path.moveTo(mx + tenth, my - tenth);
+        path.lineTo(mx - tenth, my + tenth);
+        return path;
+      }
+      return null;
+    }
+  }
+
+  class Circle extends Entity implements AutoPop {
+    Ellipse2D.Double  circle = new Ellipse2D.Double();
+    private double    cx, cy, radius;
+
+    Circle (String type) {
+      super(type);
+    }
+
+    @Override
+    void addParm (int gCode, String value) {
+      switch (gCode) {
+      case 10:                                  // Center Point X1
+        cx = Double.parseDouble(value) * uScale;
+        break;
+      case 20:                                  // Center Point Y2
+        cy = Double.parseDouble(value) * uScale;
+        break;
+      case 40:                                  // Radius
+        radius = Double.parseDouble(value) * uScale;
+        break;
+      }
+    }
+
+    @Override
+    Shape getShape () {
+      return circle;
+    }
+
+    @Override
+    void close () {
+      circle.setFrame(cx - radius, cy - radius, radius * 2, radius * 2);
+    }
+  }
+
+  class Arc extends Entity implements AutoPop {
+    Arc2D.Double arc = new Arc2D.Double(Arc2D.OPEN);
+    private double    cx, cy, startAngle, endAngle, radius;
+
+    Arc (String type) {
+      super(type);
+    }
+
+    @Override
+    void addParm (int gCode, String value) {
+      switch (gCode) {
+      case 10:                                  // Center Point X1
+        cx = Double.parseDouble(value) * uScale;
+        break;
+      case 20:                                  // Center Point Y2
+        cy = Double.parseDouble(value) * uScale;
+        break;
+      case 40:                                  // Radius
+        radius = Double.parseDouble(value) * uScale;
+        break;
+      case 50:                                  // Start Angle
+        startAngle = Double.parseDouble(value);
+        break;
+      case 51:                                  // End Angle
+        endAngle = Double.parseDouble(value);
+        break;
+      }
+    }
+
+    @Override
+    Shape getShape () {
+      return arc;
+    }
+
+    @Override
+    void close () {
+      arc.setFrame(cx - radius, cy - radius, radius * 2, radius * 2);
+      // Make angle negative so it runs clockwise when using Arc2D.Double
+      arc.setAngleStart(-startAngle);
+      double extent = startAngle - (endAngle < startAngle ? endAngle + 360 : endAngle);
+      arc.setAngleExtent(extent);
+    }
+  }
+
+  class Line extends Entity implements AutoPop {
+    Path2D.Double         path = new Path2D.Double();
+    private double        xStart, yStart, xEnd, yEnd;
+
+    Line (String type) {
+      super(type);
+    }
+
+    @Override
+    void addParm (int gCode, String value) {
+      switch (gCode) {
+      case 10:                              // Line Point X1
+        xStart = Double.parseDouble(value) * uScale;
+        break;
+      case 20:                              // Line Point Y2
+        yStart = Double.parseDouble(value) * uScale;
+        break;
+      case 11:                              // Line Point X2
+        xEnd = Double.parseDouble(value) * uScale;
+        break;
+      case 21:                              // Line Point Y2
+        yEnd = Double.parseDouble(value) * uScale;
+        break;
+      }
+    }
+
+    @Override
+    void close () {
+      path.moveTo(xStart, yStart);
+      path.lineTo(xEnd, yEnd);
+    }
+
+    @Override
+    Shape getShape () {
+      return path;
     }
   }
 
@@ -200,12 +473,11 @@ public class DXFReader {
     }
 
     @Override
-    boolean addParm (int gCode, String value) {
+    void addParm (int gCode, String value) {
       if (gCode == 70) {
         int flags = Integer.parseInt(value);
         close = (flags & 1) != 0;
       }
-      return false;
     }
 
     @Override
@@ -216,6 +488,11 @@ public class DXFReader {
         }
         points.add((Vertex) child);
       }
+    }
+
+    @Override
+    Shape getShape () {
+      return path;
     }
 
     @Override
@@ -255,7 +532,7 @@ public class DXFReader {
     }
 
     @Override
-    boolean addParm (int gCode, String value) {
+    void addParm (int gCode, String value) {
       switch (gCode) {
       case 10:                                    // Vertex X
         xx = Double.parseDouble(value) * uScale;
@@ -267,25 +544,32 @@ public class DXFReader {
         bulge =  Double.parseDouble(value);
         break;
       }
-      return false;
     }
   }
 
-  class LwPolyline extends Entity {
-    Path2D.Double         path = new Path2D.Double();
-    private int           vertices;
-    private double        xCp, yCp, firstX, firstY, lastX, lastY;
+  class LwPolyline extends Entity implements AutoPop {
+    Path2D.Double         path;
+    List<LSegment>        segments = new ArrayList<>();
+    LSegment              cSeg;
+    private double        xCp, yCp;
     private boolean       hasXcp, hasYcp;
-    private boolean       firstPoint = true;
-    private boolean       close, closed;
-    private double        bulge;
+    private boolean       close;
+
+    class LSegment {
+      private double  dx, dy, bulge;
+
+      LSegment (double dx, double dy) {
+        this.dx = dx;
+        this.dy = dy;
+      }
+    }
 
     LwPolyline (String type) {
       super(type);
     }
 
     @Override
-    boolean addParm (int gCode, String value) {
+    void addParm (int gCode, String value) {
       switch (gCode) {
       case 10:                                      // Control Point X
         xCp = Double.parseDouble(value) * uScale;
@@ -299,85 +583,51 @@ public class DXFReader {
         int flags = Integer.parseInt(value);
         close = (flags & 0x01) != 0;
         break;
-      case 90:                                      // Number of vertices
-        vertices = Integer.parseInt(value);
-        break;
       case 42:                                      // Bulge factor  (positive = right, negative = left)
-        bulge = Double.parseDouble(value);
+        cSeg.bulge = Double.parseDouble(value);
         break;
       }
       if (hasXcp && hasYcp) {
         hasXcp = hasYcp = false;
-        if (bulge != 0) {
-          path.append(getArcBulge(new Point2D.Double(lastX, lastY), new Point2D.Double(xCp, yCp), bulge), true);
-          bulge = 0;
-        } else {
-          if (firstPoint) {
-            firstPoint = false;
-            path.moveTo(lastX = firstX = xCp, lastY = firstY = yCp);
-          } else {
-            path.lineTo(lastX = xCp, lastY = yCp);
-          }
-          return --vertices == 0;
-        }
+        segments.add(cSeg = new LSegment(xCp, yCp));
       }
-      return false;
+    }
+
+    @Override
+    Shape getShape () {
+      return path;
     }
 
     @Override
     void close () {
-      if (close && !closed) {
-        if (bulge != 0 && lastX != firstX && lastY != firstY) {
-          path.append(getArcBulge(new Point2D.Double(lastX, lastY), new Point2D.Double(firstX, firstY), bulge), true);
-          bulge = 0;
+      path = new Path2D.Double();
+      boolean first = true;
+      double lastX = 0, lastY = 0;
+      for (LSegment seg : segments) {
+        if (seg.bulge != 0) {
+          if (first) {
+            lastX = seg.dx;
+            lastY = seg.dy;
+            first = false;
+          } else {
+            path.append(getArcBulge(new Point2D.Double(lastX, lastY), new Point2D.Double(lastX = seg.dx, lastY = seg.dy), seg.bulge), true);
+          }
         } else {
-          path.closePath();
-          closed = true;
+          if (first) {
+            path.moveTo(lastX = seg.dx, lastY = seg.dy);
+            first = false;
+          } else {
+            path.lineTo(lastX = seg.dx, lastY = seg.dy);
+          }
         }
       }
+      if (close) {
+        path.closePath();
+      }
     }
   }
 
-  class Line extends Entity {
-    Path2D.Double         path = new Path2D.Double();
-    private double        xStart, yStart, xEnd, yEnd;
-    private boolean       hasXStart, hasYStart, hasXEnd, hasYEnd;
-
-    Line (String type) {
-      super(type);
-    }
-
-    @Override
-    boolean addParm (int gCode, String value) {
-      switch (gCode) {
-      case 10:                              // Line Point X1
-        xStart = Double.parseDouble(value) * uScale;
-        hasXStart = true;
-        break;
-      case 20:                              // Line Point Y2
-        yStart = Double.parseDouble(value) * uScale;
-        hasYStart = true;
-        break;
-      case 11:                              // Line Point X2
-        xEnd = Double.parseDouble(value) * uScale;
-        hasXEnd = true;
-        break;
-      case 21:                              // Line Point Y2
-        yEnd = Double.parseDouble(value) * uScale;
-        hasYEnd = true;
-        break;
-      }
-      if (hasXStart && hasYStart && hasXEnd && hasYEnd) {
-        hasXStart = hasYStart = hasXEnd = hasYEnd = false;
-        path.moveTo(xStart, yStart);
-        path.lineTo(xEnd, yEnd);
-        return true;
-      }
-      return false;
-    }
-  }
-
-  class Spline extends Entity {
+  class Spline extends Entity implements AutoPop {
     Path2D.Double         path = new Path2D.Double();
     List<Point2D.Double>  cPoints = new ArrayList<>();
     private double        xCp, yCp;
@@ -390,7 +640,7 @@ public class DXFReader {
     }
 
     @Override
-    boolean addParm (int gCode, String value) {
+    void addParm (int gCode, String value) {
       switch (gCode) {
       case 10:                                    // Control Point X
         xCp = Double.parseDouble(value) * uScale;
@@ -451,7 +701,11 @@ public class DXFReader {
           }
         }
       }
-      return false;
+    }
+
+    @Override
+    Shape getShape () {
+      return path;
     }
   }
 
@@ -501,6 +755,25 @@ public class DXFReader {
     }
   }
 
+  private void addEntity (Entity entity) {
+    if (cEntity instanceof Block) {
+      Block block = (Block) cEntity;
+      if (entity instanceof Insert) {
+        push();
+        entities.add(entity);
+        cEntity = entity;
+      } else {
+        push();
+        block.addEntity(entity);
+        cEntity = entity;
+      }
+    } else {
+      push();
+      entities.add(entity);
+      cEntity = entity;
+    }
+  }
+
   private void debugPrint (String value) {
     for (int ii = 0; ii < stack.size(); ii++) {
       System.out.print("  ");
@@ -510,8 +783,6 @@ public class DXFReader {
 
   Shape[] parseFile (File file, double maxSize, double minSize) throws IOException {
     stack = new ArrayList<>();
-    hVariables = null;
-    ArrayList<Shape> shapes = new ArrayList<>();
     cEntity = null;
     Scanner lines = new Scanner(new FileInputStream(file));
     while (lines.hasNextLine()) {
@@ -520,31 +791,40 @@ public class DXFReader {
       int gCode = Integer.parseInt(line);
       switch (gCode) {
       case 0:                             // Entity type
+        if (cEntity instanceof AutoPop) {
+          pop();
+        }
         if (DEBUG) {
           debugPrint(value);
         }
         switch (value) {
         case "SECTION":
-          cEntity = new Entity(null);
+          cEntity = new Section(value);
           break;
         case "ENDSEC":
-          if (cEntity instanceof Header) {
-            cEntity.close();
-            hVariables = ((Header) cEntity).variables;
+          if (cEntity instanceof Section) {
+            Section section = (Section) cEntity;
+            if ("HEADER".equals(section.sType)) {
+              Map<Integer,String> attrs = section.attributes.get("$INSUNITS");
+              if (attrs != null) {
+                String units = attrs.get(70);
+                setUnits(units);
+              }
+            }
           }
           cEntity = null;
           stack.clear();
           break;
         case "TABLE":
           push();
-          addChildToTop(cEntity = new Entity(value));
+          cEntity = new Entity(value);
           break;
         case "ENDTAB":
           pop();
           break;
         case "BLOCK":
           push();
-          addChildToTop(cEntity = new Entity(value));
+          cEntity = new Block(value);
           break;
         case "ENDBLK":
           pop();
@@ -553,40 +833,35 @@ public class DXFReader {
           }
           break;
         case "SPLINE":
-          if (cEntity != null && "BLOCK".equals(cEntity.type)) {
-            push();
-          }
-          Spline spline = new Spline(value);
-          shapes.add(spline.path);
-          addChildToTop(cEntity = spline);
+          addEntity(new Spline(value));
           break;
-        case "HATCH":
         case "INSERT":
+          addEntity(new Insert(value));
+          break;
+          /*
+        case "HATCH":
           if (cEntity != null && "BLOCK".equals(cEntity.type)) {
             push();
           }
-          addChildToTop(cEntity = new Entity(value));
+          cEntity = new Entity(value);
+          break;*/
+        case "CIRCLE":
+          addEntity(new Circle(value));
+          break;
+        case "ARC":
+          addEntity(new Arc(value));
           break;
         case "LINE":
-          push();
-          Line line2D = new Line(value);
-          closers.add(line2D);
-          shapes.add(line2D.path);
-          addChildToTop(cEntity = line2D);
+          addEntity(new Line(value));
           break;
-        case "LWPOLYLINE":
-          push();
-          LwPolyline lwPoly = new LwPolyline(value);
-          closers.add(lwPoly);
-          shapes.add(lwPoly.path);
-          addChildToTop(cEntity = lwPoly);
+        case "DIMENSION":
+          addEntity(new Dimen(value));
           break;
         case "POLYLINE":
-          push();
-          Polyline poly = new Polyline(value);
-          closers.add(poly);
-          shapes.add(poly.path);
-          addChildToTop(cEntity = poly);
+          addEntity(new Polyline(value));
+          break;
+        case "LWPOLYLINE":
+          addEntity( new LwPolyline(value));
           break;
         case "VERTEX":
           if (cEntity != null && !"VERTEX".equals(cEntity.type)) {
@@ -599,18 +874,6 @@ public class DXFReader {
             pop();
           }
           break;
-        default:
-          cEntity = null;
-          break;
-        }
-        break;
-      case 2:                             // Entity Name
-        if (cEntity != null) {
-          if ("HEADER".equals(value)) {
-            cEntity = new Header(value);
-          } else {
-            cEntity.setType(value);
-          }
         }
         break;
       default:
@@ -618,16 +881,19 @@ public class DXFReader {
           if (DEBUG) {
             debugPrint(gCode + ": " + value);
           }
-          if (cEntity.addParm(gCode, value)) {
-            pop();
-          }
+          cEntity.addParm(gCode, value);
         }
         break;
       }
     }
-    for (Entity entity : closers) {
-      entity.close();
+    ArrayList<Shape> shapes = new ArrayList<>();
+    for (Entity entity : entities) {
+      Shape shape = entity.getShape();
+      if (shape != null) {
+        shapes.add(shape);
+      }
     }
+
     Shape[] sOut = new Shape[shapes.size()];
     if (shapes.size() > 0) {
       for (Shape shape : shapes) {
@@ -656,17 +922,13 @@ public class DXFReader {
     return sOut;
   }
 
-  String getHeaderVariable (String name) {
-    return hVariables != null ? hVariables.get(name) : "no header";
-  }
-
   /*
    * Simple DXF Viewer to test the Parser
    */
 
   static class DXFViewer extends JPanel {
     private DecimalFormat df = new DecimalFormat("#0.0#");
-    private final double  SCREEN_PPI = java.awt.Toolkit.getDefaultToolkit().getScreenResolution();
+    private final double  SCREEN_PPI = Toolkit.getDefaultToolkit().getScreenResolution();
     private Shape[]       shapes;
     private double        border = 0.125;
     private DXFReader     dxf;
@@ -730,7 +992,7 @@ public class DXFReader {
     if (args.length < 1) {
       System.out.println("Usage: java -jar DXFReader.jar <dxf file>");
     } else {
-      DXFViewer viewer = new DXFViewer(args[0], 14.0, 12.0);
+      new DXFViewer(args[0], 12.0, 8.0);
     }
   }
 }
