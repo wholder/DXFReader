@@ -507,7 +507,7 @@ public class DXFReader {
           path.moveTo(firstX = lastX = vertex.xx, firstY = lastY = vertex.yy);
         } else {
           if (bulge != 0) {
-            path.append(getArcBulge(new Point2D.Double(lastX, lastY), new Point2D.Double(vertex.xx, vertex.yy), bulge), true);
+            path.append(getArcBulge(lastX, lastY, vertex.xx, vertex.yy, bulge), true);
             lastX = vertex.xx;
             lastY = vertex.yy;
           } else {
@@ -518,7 +518,7 @@ public class DXFReader {
       }
       if (close && !closed) {
         if (bulge != 0) {
-          path.append(getArcBulge(new Point2D.Double(lastX, lastY), new Point2D.Double(firstX, firstY), bulge), true);
+          path.append(getArcBulge(lastX, lastY, firstX, firstY, bulge), true);
         } else {
           path.closePath();
         }
@@ -606,15 +606,10 @@ public class DXFReader {
       path = new Path2D.Double();
       boolean first = true;
       double lastX = 0, lastY = 0;
+      double bulge = 0;
       for (LSegment seg : segments) {
-        if (seg.bulge != 0) {
-          if (first) {
-            lastX = seg.dx;
-            lastY = seg.dy;
-            first = false;
-          } else {
-            path.append(getArcBulge(new Point2D.Double(lastX, lastY), new Point2D.Double(lastX = seg.dx, lastY = seg.dy), seg.bulge), true);
-          }
+        if (bulge != 0) {
+          path.append(getArcBulge(lastX, lastY, lastX = seg.dx, lastY = seg.dy, bulge), true);
         } else {
           if (first) {
             path.moveTo(lastX = seg.dx, lastY = seg.dy);
@@ -623,6 +618,7 @@ public class DXFReader {
             path.lineTo(lastX = seg.dx, lastY = seg.dy);
           }
         }
+        bulge = seg.bulge;
       }
       if (close) {
         path.closePath();
@@ -715,12 +711,16 @@ public class DXFReader {
 
   /**
    *  See: http://darrenirvine.blogspot.com/2015/08/polylines-radius-bulge-turnaround.html
-   * @param p1 Starting point for Arc
-   * @param p2 Ending point for Arc
+   * @param sx Starting x for Arc
+   * @param sy Starting y for Arc
+   * @param ex Ending x for Arc
+   * @param ey Ending y for Arc
    * @param bulge bulge factor (bulge > 0 = clockwise, else counterclockwise)
    * @return Arc2D.Double object
    */
-  private Arc2D.Double getArcBulge (Point2D.Double p1, Point2D.Double p2, double bulge) {
+  private Arc2D.Double getArcBulge (double sx, double sy, double ex, double ey, double bulge) {
+    Point2D.Double p1 = new Point2D.Double(sx, sy);
+    Point2D.Double p2 = new Point2D.Double(ex, ey);
     Point2D.Double mp = new Point2D.Double((p2.x + p1.x) / 2, (p2.y + p1.y) / 2);
     Point2D.Double bp = new Point2D.Double(mp.x - (p1.y - mp.y) * bulge, mp.y + (p1.x - mp.x) * bulge);
     double u = p1.distance(p2);
