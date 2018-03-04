@@ -257,13 +257,7 @@ public class DXFReader {
 
     @Override
     Shape getShape () {
-      if (xScale >= 0) {
-        rotation = -rotation;
-      }
       Block block = blockDict.get(blockHandle);
-      if ("zd".equals(blockHandle)) {
-        int dum = 0;
-      }
       if (block != null && block.entities.size() > 0) {
         Path2D.Double path = new Path2D.Double();
         for (Entity entity : block.entities) {
@@ -272,9 +266,15 @@ public class DXFReader {
             if (ix != 0 || iy != 0 || xScale != 1.0 || yScale != 1.0 || rotation != 0) {
               // TODO: get translation, scaling, etc. fully working
               AffineTransform at = new AffineTransform();
-              at.translate(ix, iy);
-              at.scale(xScale, yScale);
-              at.rotate(Math.toRadians(-rotation));
+              if (ix != 0 || iy != 0) {
+                at.translate(ix, iy);
+              }
+              if (xScale != 1.0 || yScale != 1.0) {
+                at.scale(xScale, yScale);
+              }
+              if (rotation != 0) {
+                at.rotate(Math.toRadians(xScale < 0 ? - rotation : rotation));
+              }
               shape = at.createTransformedShape(shape);
             }
             path.append(shape, false);
