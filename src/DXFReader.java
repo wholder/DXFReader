@@ -41,9 +41,9 @@ import java.util.List;
  */
 
 public class DXFReader {
-  private static boolean        DEBUG = false;
+  private static boolean        DEBUG = true;
   private static boolean        INFO = false;
-  private ArrayList<Entity>     entities = new ArrayList<>();
+  private ArrayList<DrawItem>   entities = new ArrayList<>();
   private ArrayList<Entity>     stack = new ArrayList<>();
   private Map<String,Block>     blockDict = new HashMap<>();
   private Entity                cEntity = null;
@@ -66,11 +66,18 @@ public class DXFReader {
 
     void addChild (Entity child) { }
 
+    void close () { }
+  }
+
+  class DrawItem extends Entity {
+
+    DrawItem (String type) {
+      super(type);
+    }
+
     Shape getShape () {
       return null;
     }
-
-    void close () { }
   }
 
   class Section extends Entity {
@@ -186,11 +193,18 @@ public class DXFReader {
     }
   }
 
+  // TODO: implement when I understand how this is supposed to work...
+  class MText extends DrawItem implements AutoPop {
+    MText (String type) {
+      super(type);
+    }
+  }
+
   class Block extends Entity {
-    private String        name, handle;
-    private List<Entity>  entities = new ArrayList<>();
-    private double        baseX, baseY;
-    private int           flags;
+    private String          name, handle;
+    private List<DrawItem>  entities = new ArrayList<>();
+    private double          baseX, baseY;
+    private int             flags;
 
     Block (String type) {
       super(type);
@@ -218,12 +232,19 @@ public class DXFReader {
       }
     }
 
-    void addEntity (Entity entity) {
+    void addEntity (DrawItem entity) {
       entities.add(entity);
     }
   }
 
-  class Insert extends Entity implements AutoPop {
+  // TODO: implement when I understand how this is supposed to work...
+  class Hatch extends DrawItem implements AutoPop {
+    Hatch (String type) {
+      super(type);
+    }
+  }
+
+  class Insert extends DrawItem implements AutoPop {
     private String    blockHandle;
     private double    ix, iy, xScale = 1.0, yScale = 1.0, rotation;
 
@@ -260,11 +281,16 @@ public class DXFReader {
       Block block = blockDict.get(blockHandle);
       if (block != null && block.entities.size() > 0) {
         Path2D.Double path = new Path2D.Double();
-        for (Entity entity : block.entities) {
+        for (DrawItem entity : block.entities) {
           Shape shape = entity.getShape();
           if (shape != null) {
+            if (block.baseX != 0 || block.baseY != 0) {
+              // TODO: make this work...
+              AffineTransform at = new AffineTransform();
+              at.translate(block.baseX, block.baseY);
+              shape = at.createTransformedShape(shape);
+            }
             if (ix != 0 || iy != 0 || xScale != 1.0 || yScale != 1.0 || rotation != 0) {
-              // TODO: get translation, scaling, etc. fully working
               AffineTransform at = new AffineTransform();
               if (ix != 0 || iy != 0) {
                 at.translate(ix, iy);
@@ -289,7 +315,7 @@ public class DXFReader {
   /*
    * Note: code for "DIMENSION" is incomplete
    */
-  class Dimen extends Entity implements AutoPop {
+  class Dimen extends DrawItem implements AutoPop {
     private String    blockHandle;
     private double    ax, ay, mx, my;
     private int       type, orientation;
@@ -330,7 +356,7 @@ public class DXFReader {
       Block block = blockDict.get(blockHandle);
       if (block != null && block.entities.size() > 0) {
         Path2D.Double path = new Path2D.Double();
-        for (Entity entity : block.entities) {
+        for (DrawItem entity : block.entities) {
           Shape shape = entity.getShape();
           if (shape != null) {
             path.append(shape, false);
@@ -348,7 +374,14 @@ public class DXFReader {
     }
   }
 
-  class Circle extends Entity implements AutoPop {
+  // TODO: implement ellipse code when I find an example file that uses as ELLIPSE
+  class Ellipse extends DrawItem implements AutoPop {
+    Ellipse (String type) {
+      super(type);
+    }
+  }
+
+  class Circle extends DrawItem implements AutoPop {
     Ellipse2D.Double  circle = new Ellipse2D.Double();
     private double    cx, cy, radius;
 
@@ -382,7 +415,7 @@ public class DXFReader {
     }
   }
 
-  class Arc extends Entity implements AutoPop {
+  class Arc extends DrawItem implements AutoPop {
     Arc2D.Double arc = new Arc2D.Double(Arc2D.OPEN);
     private double    cx, cy, startAngle, endAngle, radius;
 
@@ -426,7 +459,7 @@ public class DXFReader {
     }
   }
 
-  class Line extends Entity implements AutoPop {
+  class Line extends DrawItem implements AutoPop {
     Path2D.Double         path = new Path2D.Double();
     private double        xStart, yStart, xEnd, yEnd;
 
@@ -464,12 +497,12 @@ public class DXFReader {
     }
   }
 
-  class Polyline extends Entity {
-    Path2D.Double     path = new Path2D.Double();
-    List<Vertex>      points;
-    private double    firstX, firstY, lastX, lastY;
-    private boolean   firstPoint = true;
-    private boolean   close, closed;
+  class Polyline extends DrawItem {
+    private Path2D.Double   path;
+    private List<Vertex>    points;
+    private double          firstX, firstY, lastX, lastY;
+    private boolean         firstPoint = true;
+    private boolean         close;
 
     Polyline (String type) {
       super(type);
@@ -500,6 +533,7 @@ public class DXFReader {
 
     @Override
     void close () {
+      path = new Path2D.Double();
       double bulge = 0.0;
       for (Vertex vertex : points) {
         if (firstPoint) {
@@ -516,13 +550,12 @@ public class DXFReader {
         }
         bulge = vertex.bulge;
       }
-      if (close && !closed) {
+      if (close) {
         if (bulge != 0) {
           path.append(getArcBulge(lastX, lastY, firstX, firstY, bulge), true);
         } else {
           path.closePath();
         }
-        closed = true;
       }
     }
   }
@@ -550,7 +583,7 @@ public class DXFReader {
     }
   }
 
-  class LwPolyline extends Entity implements AutoPop {
+  class LwPolyline extends DrawItem implements AutoPop {
     Path2D.Double         path;
     List<LSegment>        segments = new ArrayList<>();
     LSegment              cSeg;
@@ -626,7 +659,7 @@ public class DXFReader {
     }
   }
 
-  class Spline extends Entity implements AutoPop {
+  class Spline extends DrawItem implements AutoPop {
     Path2D.Double         path = new Path2D.Double();
     List<Point2D.Double>  cPoints = new ArrayList<>();
     private double        xCp, yCp;
@@ -758,10 +791,10 @@ public class DXFReader {
     }
   }
 
-  private void addEntity (Entity entity) {
+  private void addEntity (DrawItem entity) {
     if (cEntity instanceof Block) {
       Block block = (Block) cEntity;
-      if (entity instanceof Insert) {
+      if (entity instanceof Insert && (block.flags & 2) != 0) {
         push();
         entities.add(entity);
         cEntity = entity;
@@ -841,13 +874,12 @@ public class DXFReader {
         case "INSERT":
           addEntity(new Insert(value));
           break;
-          /*
+        case "MTEXT":
+          addEntity(new MText(value));
+          break;
         case "HATCH":
-          if (cEntity != null && "BLOCK".equals(cEntity.type)) {
-            push();
-          }
-          cEntity = new Entity(value);
-          break;*/
+          addEntity(new Hatch(value));
+          break;
         case "CIRCLE":
           addEntity(new Circle(value));
           break;
@@ -890,7 +922,7 @@ public class DXFReader {
       }
     }
     ArrayList<Shape> shapes = new ArrayList<>();
-    for (Entity entity : entities) {
+    for (DrawItem entity : entities) {
       Shape shape = entity.getShape();
       if (shape != null) {
         shapes.add(shape);
@@ -995,7 +1027,7 @@ public class DXFReader {
     if (args.length < 1) {
       System.out.println("Usage: java -jar DXFReader.jar <dxf file>");
     } else {
-      new DXFViewer(args[0], 12.0, 8.0);
+      new DXFViewer(args[0], 14.0, 8.0);
     }
   }
 }
