@@ -41,7 +41,7 @@ import java.util.List;
  */
 
 public class DXFReader {
-  private static boolean        DEBUG = true;
+  private static boolean        DEBUG = false;
   private static boolean        INFO = false;
   private ArrayList<DrawItem>   entities = new ArrayList<>();
   private ArrayList<Entity>     stack = new ArrayList<>();
@@ -587,6 +587,7 @@ public class DXFReader {
     Path2D.Double         path;
     List<LSegment>        segments = new ArrayList<>();
     LSegment              cSeg;
+    private int           vertices;
     private double        xCp, yCp;
     private boolean       hasXcp, hasYcp;
     private boolean       close;
@@ -621,6 +622,12 @@ public class DXFReader {
         break;
       case 42:                                      // Bulge factor  (positive = right, negative = left)
         cSeg.bulge = Double.parseDouble(value);
+        if ((1 - Math.abs(cSeg.bulge)) < .001) {
+          int dum = 0;
+        }
+        break;
+      case 90:                                      // Number of Vertices
+        vertices = Integer.parseInt(value);
         break;
       }
       if (hasXcp && hasYcp) {
@@ -638,14 +645,14 @@ public class DXFReader {
     void close () {
       path = new Path2D.Double();
       boolean first = true;
-      double lastX = 0, lastY = 0;
+      double lastX = 0, lastY = 0, firstX = 0, firstY = 0;
       double bulge = 0;
       for (LSegment seg : segments) {
         if (bulge != 0) {
           path.append(getArcBulge(lastX, lastY, lastX = seg.dx, lastY = seg.dy, bulge), true);
         } else {
           if (first) {
-            path.moveTo(lastX = seg.dx, lastY = seg.dy);
+            path.moveTo(firstX = lastX = seg.dx, firstY = lastY = seg.dy);
             first = false;
           } else {
             path.lineTo(lastX = seg.dx, lastY = seg.dy);
@@ -654,7 +661,11 @@ public class DXFReader {
         bulge = seg.bulge;
       }
       if (close) {
-        path.closePath();
+        if (bulge != 0) {
+          path.append(getArcBulge(lastX, lastY, firstX, firstY, bulge), true);
+        } else {
+          path.lineTo(firstX, firstY);
+        }
       }
     }
   }
