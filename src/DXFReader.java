@@ -676,7 +676,7 @@ public class DXFReader {
     private double        xCp, yCp;
     private boolean       hasXcp, hasYcp;
     private boolean       closed;
-    private int           numCPs;
+    private int           numCPs, flags;
 
     Spline (String type) {
       super(type);
@@ -694,11 +694,22 @@ public class DXFReader {
         hasYcp = true;
         break;
       case 70:                                    // Flags
-        int flags = Integer.parseInt(value);
+        flags = Integer.parseInt(value);
+        // Usages:
+        //  Mistletoe Monogram.dxf:
+        //    11 - closed periodic planar
+        //  Chistmas Carols.dxf
+        //    11 - closed periodic planar
+        //     8 - planar
+        //  scope-bat-acrylic.dxf
+        //    8 - planar
         closed = (flags & 0x01) != 0;
         break;
       case 73:                                    // Number of Control Points
         numCPs = Integer.parseInt(value);
+        break;
+      default:
+        //System.out.println("Spline.addParm() unimplemented gCode: " + gCode + ", val: " + value);
         break;
       }
       if (hasXcp && hasYcp) {
@@ -708,7 +719,7 @@ public class DXFReader {
           // Convert Catmull-Rom Spline into Cubic Bezier Curve in a Path2D object
           Point2D.Double[] points = cPoints.toArray(new Point2D.Double[cPoints.size()]);
           path.moveTo(points[0].x, points[0].y);
-          int end = closed ? points.length + 1 : points.length - 1;
+          int end = closed ? points.length + 1 : points.length;
           for (int ii = 0;  ii < end - 1; ii++) {
             Point2D.Double p0, p1, p2, p3;
             if (closed) {
@@ -853,6 +864,11 @@ public class DXFReader {
             Section section = (Section) cEntity;
             if ("HEADER".equals(section.sType)) {
               Map<Integer,String> attrs = section.attributes.get("$INSUNITS");
+              if (attrs != null) {
+                String units = attrs.get(70);
+                setUnits(units);
+              }
+              attrs = section.attributes.get("$LUNITS");
               if (attrs != null) {
                 String units = attrs.get(70);
                 setUnits(units);
