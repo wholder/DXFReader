@@ -41,8 +41,9 @@ import java.util.List;
  */
 
 public class DXFReader {
-  private static boolean        DEBUG = false;
-  private static boolean        INFO = false;
+  private static final boolean  DEBUG = false;
+  private static final boolean  INFO = false;
+  private static final boolean  ANIMATE = false;
   private ArrayList<DrawItem>   entities = new ArrayList<>();
   private ArrayList<Entity>     stack = new ArrayList<>();
   private Map<String,Block>     blockDict = new HashMap<>();
@@ -50,9 +51,18 @@ public class DXFReader {
   private Rectangle2D           bounds;
   private double                uScale = 0.039370078740157; // default to millimeters as units
   private String                units = "unknown";
-  private boolean               scaled;
+  private boolean               scaled, useMillimeters;
 
   interface AutoPop {}
+
+
+  public DXFReader() {
+    this(true);
+  }
+
+  public DXFReader (boolean useMillimeters) {
+    this.useMillimeters = useMillimeters;
+  }
 
   class Entity {
     private String        type;
@@ -105,8 +115,8 @@ public class DXFReader {
   private void setUnits (String val) {
     if (val != null) {
       switch (Integer.parseInt(val)) {
-      case 0:             // unitless (assume millimeters)
-        uScale = 0.039370078740157;
+      case 0:             // unitless (millimeters, or inches)
+        uScale = useMillimeters ? 0.039370078740157 : 1.0;
         units = "unitless";
         break;
       case 1:             // inches
@@ -955,7 +965,6 @@ public class DXFReader {
         shapes.add(shape);
       }
     }
-
     Shape[] sOut = new Shape[shapes.size()];
     if (shapes.size() > 0) {
       for (Shape shape : shapes) {
@@ -988,7 +997,7 @@ public class DXFReader {
    * Simple DXF Viewer to test the Parser
    */
 
-  static class DXFViewer extends JPanel {
+  static class DXFViewer extends JPanel implements Runnable {
     private DecimalFormat df = new DecimalFormat("#0.0#");
     private final double  SCREEN_PPI = Toolkit.getDefaultToolkit().getScreenResolution();
     private Shape[]       shapes;
@@ -1016,8 +1025,25 @@ public class DXFReader {
         frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
         frame.setResizable(false);
         frame.setVisible(true);
+        if (ANIMATE) {
+          (new Thread(this)).start();
+        }
       } else {
         throw new IllegalStateException("No shapes found in file: " + fileName);
+      }
+    }
+
+    int frame = 0;
+
+    public void run () {
+      while (true) {
+        try {
+          Thread.sleep(500);
+          frame++;
+          repaint();
+        } catch (InterruptedException ex) {
+          ex.printStackTrace();
+        }
       }
     }
 
@@ -1031,8 +1057,20 @@ public class DXFReader {
       atScale.translate(border * SCREEN_PPI, border * SCREEN_PPI);
       atScale.scale(SCREEN_PPI, SCREEN_PPI);
       g2.setColor(Color.black);
-      for (Shape shape : shapes) {
-        g2.draw(atScale.createTransformedShape(shape));
+      if (ANIMATE) {
+        if (shapes != null) {
+          int count = 0;
+          for (Shape shape : shapes) {
+            if (count++ >= frame) {
+              break;
+            }
+            g2.draw(atScale.createTransformedShape(shape));
+          }
+        }
+      } else {
+        for (Shape shape : shapes) {
+          g2.draw(atScale.createTransformedShape(shape));
+        }
       }
       if (INFO) {
         int yOff = 30;
