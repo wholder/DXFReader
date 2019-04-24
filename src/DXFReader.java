@@ -687,6 +687,7 @@ public class DXFReader {
     private boolean       hasXcp, hasYcp;
     private boolean       closed;
     private int           numCPs, flags;
+    private boolean       hasMoveTo;
 
     Spline (String type) {
       super(type);
@@ -705,14 +706,6 @@ public class DXFReader {
         break;
       case 70:                                    // Flags
         flags = Integer.parseInt(value);
-        // Usages:
-        //  Mistletoe Monogram.dxf:
-        //    11 - closed periodic planar
-        //  Chistmas Carols.dxf
-        //    11 - closed periodic planar
-        //     8 - planar
-        //  scope-bat-acrylic.dxf
-        //    8 - planar
         closed = (flags & 0x01) != 0;
         break;
       case 73:                                    // Number of Control Points
@@ -728,7 +721,10 @@ public class DXFReader {
         if (cPoints.size() == numCPs) {
           // Convert Catmull-Rom Spline into Cubic Bezier Curve in a Path2D object
           Point2D.Double[] points = cPoints.toArray(new Point2D.Double[cPoints.size()]);
-          path.moveTo(points[0].x, points[0].y);
+          if (!hasMoveTo) {
+            path.moveTo(points[0].x, points[0].y);
+            hasMoveTo = true;
+          }
           int end = closed ? points.length + 1 : points.length;
           for (int ii = 0;  ii < end - 1; ii++) {
             Point2D.Double p0, p1, p2, p3;
@@ -760,15 +756,16 @@ public class DXFReader {
             double y3 = p2.y;
             path.curveTo(x1, y1, x2, y2, x3, y3);
           }
-          if (closed) {
-            path.closePath();
-          }
         }
       }
     }
 
     @Override
     Shape getShape () {
+      if (closed) {
+        path.closePath();
+        closed = false;
+      }
       return path;
     }
   }
