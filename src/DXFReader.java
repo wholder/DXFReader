@@ -1,5 +1,7 @@
 import javax.swing.*;
 import java.awt.*;
+import java.awt.font.GlyphVector;
+import java.awt.font.TextAttribute;
 import java.awt.geom.*;
 import java.io.File;
 import java.io.FileInputStream;
@@ -20,7 +22,8 @@ import java.util.List;
  *
  *  I've tested this code with a variety of simple, 2D DXF files and it's able to read most of them.  However,
  *  the DXF file specification is very complex and I have only implemented a subset of it, so I cannot guarantee
- *  that this code will read all 2D DXF files.
+ *  that this code will read all 2D DXF files.  Some instance variables are placeholders for features that have
+ *  yet to be implmenented.
  *
  *  I'm publishing this source code under the MIT License (See: https://opensource.org/licenses/MIT)
  *
@@ -46,7 +49,7 @@ public class DXFReader {
   private static final boolean  ANIMATE = false;
   private ArrayList<DrawItem>   entities = new ArrayList<>();
   private ArrayList<Entity>     stack = new ArrayList<>();
-  private Map<String,Block>     blockDict = new HashMap<>();
+  private Map<String,Block>     blockDict = new TreeMap<>();
   private Entity                cEntity = null;
   private Rectangle2D           bounds;
   private double                uScale = 0.039370078740157; // default to millimeters as units
@@ -91,9 +94,9 @@ public class DXFReader {
   }
 
   class Section extends Entity {
-    private Map<String,Map<Integer,String>>  attributes = new TreeMap<>();
-    private Map<Integer,String>              attValues;
-    private String  sType;
+    private Map<String,Map<Integer,String>>   attributes = new TreeMap<>();
+    private Map<Integer,String>               attValues;
+    private String                            sType;
 
     Section (String type) {
       super(type);
@@ -203,10 +206,368 @@ public class DXFReader {
     }
   }
 
-  // TODO: implement when I understand how this is supposed to work...
+  /**
+   * Crude implementation of TEXT using GlyphVector to create vector outlines of text
+   * Note: this code should use, or support vector fonts such as those by Hershey
+   */
+  class Text extends DrawItem implements AutoPop {
+    private Canvas    canvas = new Canvas();
+    private double    ix, iy, ix2, iy2, textHeight, rotation;
+    private int       hAdjust, vAdjust;
+    private String    text;
+
+    Text (String type) {
+      super(type);
+    }
+
+    @Override
+    void addParm (int gCode, String value) {
+      switch (gCode) {
+      case 1:                                       // Text string
+        // Process Control Codes and Special Chars
+        // https://forums.autodesk.com/t5/autocad-forum/text-commands-eg-u/td-p/1977654
+        StringBuilder buf = new StringBuilder();
+        for (int ii = 0; ii < value.length(); ii++) {
+          char cc = value.charAt(ii);
+          if (cc == '%') {
+            cc = value.charAt(ii + 2);
+            ii += 2;
+            if (Character.isDigit(cc)) {
+              int code = 0;
+              while (Character.isDigit(cc = value.charAt(ii))) {
+                code = (code * 10) + (cc - '0');
+                ii++;
+              }
+              // todo: how to convert value of "code" into special character
+              buf.append("\uFFFD");                 // Insert Unicode unknown character symbol
+              ii--;
+            } else {
+            switch (cc) {
+              case 'u':                             // Toggles underscoring on and off
+                // Ignored
+                break;
+              case 'd':                             // Draws degrees symbol (°)
+                buf.append("\u00B0");
+                break;
+              case 'p':                             // Draws plus/minus tolerance symbol (±)
+                buf.append("\u00B1");
+                break;
+              case 'c':                             // Draws circle diameter dimensioning symbol (Ø)
+                buf.append("\u00D8");
+                break;
+              case 'o':                             // Toggles overscoring on and off
+                // Ignored
+                break;
+              }
+            }
+          } else {
+            buf.append(cc);
+          }
+        }
+        text = buf.toString();
+        break;
+      case 10:                                      // Insertion X
+        ix = Double.parseDouble(value) * uScale;
+        break;
+      case 11:                                      // Second alignment point X
+        ix2 = Double.parseDouble(value) * uScale;
+        break;
+      case 20:                                      // Insertion Y
+        iy = Double.parseDouble(value) * uScale;
+        break;
+      case 21:                                      // Second alignment point Y
+        iy2 = Double.parseDouble(value) * uScale;
+        break;
+      case 40:                                      // Nominal (initial) text height
+        textHeight = Double.parseDouble(value) * uScale;
+        break;
+      case 50:                                      // Rotation angle in degrees
+        rotation = Double.parseDouble(value);
+        break;
+      case 71:                                      // Text generation flags (optional, default = 0):
+        // Not implemented
+        // 2 = Text is backward (mirrored in X)
+        // 4 = Text is upside down (mirrored in Y)
+        break;
+      case 72:                                      // Horizontal text justification type (optional, default = 0) integer codes
+        //0 = Left; 1= Center; 2 = Right
+        //3 = Aligned (if vertical alignment = 0)
+        //4 = Middle (if vertical alignment = 0)
+        //5 = Fit (if vertical alignment = 0)
+        hAdjust = Integer.parseInt(value);
+        break;
+      case 73:                                      // Vertical text justification type (optional, default = 0): integer codes
+        // 0 = Baseline; 1 = Bottom; 2 = Middle; 3 = Top
+        vAdjust = Integer.parseInt(value);
+        break;
+      }
+    }
+
+    @Override
+    Shape getShape () {
+      if (false) {
+        // Test code
+        Path2D.Double path = new Path2D.Double();
+        // Draw 'X' as placeholder for MTEXT at definition midpoint
+        double tenth = 4 * uScale;
+        if (hAdjust != 0 || vAdjust != 0) {
+          path.moveTo(ix2 - tenth, iy2 - tenth);
+          path.lineTo(ix2 + tenth, iy2 + tenth);
+          path.moveTo(ix2 + tenth, iy2 - tenth);
+          path.lineTo(ix2 - tenth, iy2 + tenth);
+        } else {
+          path.moveTo(ix - tenth, iy - tenth);
+          path.lineTo(ix + tenth, iy + tenth);
+          path.moveTo(ix + tenth, iy - tenth);
+          path.lineTo(ix - tenth, iy + tenth);
+        }
+        return path;
+      } else {
+        // Note: I had to scale up font size by 10x to make it render properly
+        float points = (float) textHeight * 10f;
+        Font font = (new Font("Helvetica", Font.PLAIN, 72)).deriveFont(points);
+        HashMap<TextAttribute, Object> attrs = new HashMap<>();
+        attrs.put(TextAttribute.KERNING, TextAttribute.KERNING_ON);
+        attrs.put(TextAttribute.LIGATURES, TextAttribute.LIGATURES_ON);
+        attrs.put(TextAttribute.TRACKING, 0.1);
+        font = font.deriveFont(attrs);
+        GlyphVector gv = font.createGlyphVector(canvas.getFontMetrics(font).getFontRenderContext(), text);
+        // Step 1 - Convert GlyphVector to Shape
+        AffineTransform at1 = new AffineTransform();
+        Shape shape = at1.createTransformedShape(gv.getOutline());
+        Rectangle2D bnds = shape.getBounds2D();
+        // Step 2 - Translate shape according to vAdjust and hAdjust values
+        AffineTransform at2 = new AffineTransform();
+        // TODO: test all attachment point cases
+        if (vAdjust == 3 && hAdjust == 0) {                             // Top left
+          at2.translate(0, bnds.getHeight());
+        } else if (vAdjust == 3 && hAdjust == 1) {                      // Top center
+          at2.translate(-bnds.getWidth() / 2, bnds.getHeight());
+        } else if (vAdjust == 3 && hAdjust == 2) {                      // Top right
+          at2.translate(-bnds.getWidth(), bnds.getHeight());
+        } else if (vAdjust == 2 && hAdjust == 0) {                      // Middle left
+          at2.translate(0, bnds.getHeight() / 2);
+        } else if (vAdjust == 2 && hAdjust == 1) {                      // Middle center
+          at2.translate(-bnds.getWidth() / 2, bnds.getHeight() / 2);
+        } else if (vAdjust == 2 && hAdjust == 2) {                      // Middle right
+          at2.translate(-bnds.getWidth(), bnds.getHeight() / 2);
+        } else if (vAdjust == 1 && hAdjust == 0) {                      // Bottom left (natural position)
+          at2.translate(0, 0);
+        } else if (vAdjust == 1 && hAdjust == 1) {                      // Bottom center
+          at2.translate(-bnds.getWidth() / 2, 0);
+        } else if (vAdjust == 1 && hAdjust == 2) {                      // Bottom right
+          at2.translate(-bnds.getWidth(), 0);
+        }
+        shape = at2.createTransformedShape(shape);
+        // Step 3 - Rotate and Scale shape
+        AffineTransform at3 = new AffineTransform();
+        at3.rotate(Math.toRadians(rotation));
+        at3.scale(.1, -.1);
+        shape = at3.createTransformedShape(shape);
+        // Step 4 - Translate shape to final position
+        AffineTransform at4 = new AffineTransform();
+        if (hAdjust != 0 || vAdjust != 0) {
+          at4.translate(ix2, iy2);
+        } else {
+          at4.translate(ix, iy);
+        }
+        shape = at4.createTransformedShape(shape);
+        return shape;
+      }
+    }
+  }
+
+  /**
+   * Crude implementation of MTEXT (Multi-line Text) using GlyphVector to create vector outline of text
+   * Note: the MTEXT spec is very complex and assumes the ability to decode embedded format codes, use vector fonts
+   * such as those by Hershey, and other features I have not implemented.
+   * https://knowledge.safe.com/articles/38908/autocad-workflows-reading-and-writing-text-mtext-f.html
+   *
+   * Example Text with Format Codes: https://adndevblog.typepad.com/autocad/2017/09/dissecting-mtext-format-codes.html
+   *  \A1;3'-1"
+   *  \A1;6'-10{\H0.750000x;\S1/2;}"
+   *  \A1;PROVIDE 20 MIN. DOOR\PW/ SELF CLOSING HINGES
+   *  {\Farchquik.shx|c0;MIN. 22"x 30" ATTIC ACCESS}
+   *  "HEATILATOR" 42" GAS BURNING DIRECT VENT FIREPLACE, OR EQUAL
+   *  BOLLARD,\PFOR W.H.\PPROTECTION
+   */
   class MText extends DrawItem implements AutoPop {
+    private Canvas    canvas = new Canvas();
+    private String    text, textStyle;
+    private double    ix, iy, textHeight, refWidth, xRot, yRot;
+    private int       attachPoint;
+
     MText (String type) {
       super(type);
+    }
+    @Override
+    void addParm (int gCode, String value) {
+      switch (gCode) {
+      case 1:                                         // Text string
+        // Process Format Codes (most are ignored)
+        List<String> lines = new ArrayList<>();
+        StringBuilder buf = new StringBuilder();
+        for (int jj = 0; jj < value.length(); jj++) {
+          char cc = value.charAt(jj);
+          if (cc == '\\') {
+            cc = value.charAt(++jj);
+            switch (cc) {
+              case 'A':                               // Alignment
+              case 'C':                               // Color
+              case 'F':                               // Font file name
+              case 'H':                               // Text height
+              case 'Q':                               // Slanting (obliquing) text by angle
+              case 'S':                               // Stacking Fractions
+              case 'T':                               // Tracking, char.spacing - e.g. \T2;
+              case 'W':                               // Text width
+                int tdx = value.indexOf(";", jj);
+                String val = value.substring(jj + 1, tdx);
+                jj = tdx;
+                if (cc == 'S') {                      // Stacking Fractions (1/2, 1/3, etc)
+                  if ("1/2".equals(val)) {
+                    buf.append("\u00BD");             // Unicode for 1/2
+                  } else if ("1/3".equals(val)) {
+                      buf.append("\u2153");           // Unicode for 1/3
+                  } else if ("1/4".equals(val)) {
+                    buf.append("\u00BC");             // Unicode for 1/4
+                  } else if ("2/3".equals(val)) {
+                    buf.append("\u2154");             // Unicode for 2/3
+                  } else if ("3/4".equals(val)) {
+                    buf.append("\u00BE");             // Unicode for 3/4
+                  } else {
+                    String[] parts = val.split("/");
+                    if (parts.length == 2) {
+                      buf.append(parts[0]);
+                      buf.append("\u2044");
+                      buf.append(parts[1]);
+                    }
+                  }
+                }
+                break;
+              case 'P':                               // New paragraph (new line)
+                lines.add(buf.toString());
+                buf.setLength(0);
+                break;
+              case '\\':                              // Escape character - e.g. \\ = "\", \{ = "{"
+                buf.append(value.charAt(++jj));
+                break;
+            }
+          } else if (cc == '{') {
+            // Begin area influenced by special code
+          } else if (cc == '}') {
+            // End area influenced by special code
+          } else {
+            buf.append(cc);
+          }
+        }
+        lines.add(buf.toString());
+        // Skip handling all but first line of text
+        text  = lines.get(0);
+        if (text.length() > 30 && refWidth > 0) {
+          // KLudge until code to handle "refWidth" is added
+          text = text.substring(0, 30) + "...";
+        }
+        break;
+      case 7:                                       // Text style name (STANDARD if not provided) (optional)
+        textStyle = value;
+        break;
+      case 10:                                      // Insertion X
+        ix = Double.parseDouble(value) * uScale;
+        break;
+      case 11:                                      // X Rotation Unit Vector
+        xRot = Double.parseDouble(value);
+        break;
+      case 20:                                      // Insertion Y
+        iy = Double.parseDouble(value) * uScale;
+        break;
+      case 21:                                      // Y Rotation Unit Vector
+        yRot = Double.parseDouble(value);
+        break;
+      case 40:                                      // Nominal (initial) text height
+        textHeight = Double.parseDouble(value) * uScale;
+        break;
+      case 41:                                      // Reference rectangle width
+        refWidth = Double.parseDouble(value) * uScale;
+        break;
+      case 71:                                      // Attachment point
+        attachPoint = Integer.parseInt(value);
+        break;
+      case 72:                                      // Drawing direction: 1 = Left to right; 3 = Top to bottom; 5 = By style
+        break;
+      }
+    }
+
+    @Override
+    Shape getShape () {
+      if (false) {
+        // Test code
+        Path2D.Double path = new Path2D.Double();
+        // Draw 'X' as placeholder for MTEXT at definition midpoint
+        double tenth = 1 * uScale;
+        path.moveTo(ix - tenth, iy - tenth);
+        path.lineTo(ix + tenth, iy + tenth);
+        path.moveTo(ix + tenth, iy - tenth);
+        path.lineTo(ix - tenth, iy + tenth);
+        return path;
+      } else {
+        // Note: I had to scale up font size by 10x to make it render properly
+        float points = (float) textHeight * 10f;
+        Font font = (new Font("Helvetica", Font.PLAIN, 72)).deriveFont(points);
+        HashMap<TextAttribute, Object> attrs = new HashMap<>();
+        attrs.put(TextAttribute.KERNING, TextAttribute.KERNING_ON);
+        attrs.put(TextAttribute.LIGATURES, TextAttribute.LIGATURES_ON);
+        attrs.put(TextAttribute.TRACKING, 0.1);
+        font = font.deriveFont(attrs);
+        GlyphVector gv = font.createGlyphVector(canvas.getFontMetrics(font).getFontRenderContext(), text);
+        // Step 1 - Convert GlyphVector to Shape
+        AffineTransform at1 = new AffineTransform();
+        Shape shape = at1.createTransformedShape(gv.getOutline());
+        Rectangle2D bnds = shape.getBounds2D();
+        // Step 2 - Translate shape according to Attachment Point value
+        AffineTransform at2 = new AffineTransform();
+        // TODO: test all attachment point cases
+        switch (attachPoint) {
+          case 1:                                 // Top left
+            at2.translate(0, bnds.getHeight());
+            break;
+          case 2:                                 // Top center
+            at2.translate(-bnds.getWidth() / 2, bnds.getHeight());
+            break;
+          case 3:                                 // Top right
+            at2.translate(-bnds.getWidth(), bnds.getHeight());
+            break;
+          case 4:                                 // Middle left
+            at2.translate(0, bnds.getHeight() / 2);
+            break;
+          case 5:                                 // Middle center
+            at2.translate(-bnds.getWidth() / 2, bnds.getHeight() / 2);
+            break;
+          case 6:                                 // Middle right
+            at2.translate(-bnds.getWidth(), bnds.getHeight() / 2);
+            break;
+          case 7:                                 // Bottom left (natural position)
+            at2.translate(0, 0);
+            break;
+          case 8:                                 // Bottom center
+            at2.translate(-bnds.getWidth() / 2, 0);
+            break;
+          case 9:                                 // Bottom right
+            at2.translate(-bnds.getWidth(), 0);
+            break;
+        }
+        shape = at2.createTransformedShape(shape);
+        // Step 3 - Rotate and Scale shape
+        AffineTransform at3 = new AffineTransform();
+        double rotation = Math.atan2(yRot, xRot);
+        at3.rotate(rotation);
+        at3.scale(.1, -.1);
+        shape = at3.createTransformedShape(shape);
+        // Step 4 - Translate shape to final position
+        AffineTransform at4 = new AffineTransform();
+        at4.translate(ix, iy);
+        shape = at4.createTransformedShape(shape);
+        return shape;
+      }
     }
   }
 
@@ -223,12 +584,12 @@ public class DXFReader {
     @Override
     void addParm (int gCode, String value) {
       switch (gCode) {
-      case 1:
-        name = value;
+      case 2:                                       // Block name
+        name  = value;
+        blockDict.put(name, this);
         break;
-      case 2:                                       // Block handle
+      case 5:                                       // Block handle
         handle = value;
-        blockDict.put(handle, this);
         break;
       case 10:                                      // Base Point X
         baseX = Double.parseDouble(value) * uScale;
@@ -255,8 +616,8 @@ public class DXFReader {
   }
 
   class Insert extends DrawItem implements AutoPop {
-    private String    blockHandle;
-    private double    ix, iy, xScale = 1.0, yScale = 1.0, rotation;
+    private String    blockHandle, blockName;
+    private double    ix, iy, xScale = 1.0, yScale = 1.0, zScale = 1.0, rotation;
 
     Insert (String type) {
       super(type);
@@ -265,7 +626,10 @@ public class DXFReader {
     @Override
     void addParm (int gCode, String value) {
       switch (gCode) {
-      case 2:                                     // Handle of Block to insert
+      case 2:                                     // Name of Block to insert
+        blockName = value;
+        break;
+      case 5:                                     // Handle of Block to insert
         blockHandle = value;
         break;
       case 10:                                    // Insertion X
@@ -280,6 +644,9 @@ public class DXFReader {
       case 42:                                    // Y scaling
         yScale = Double.parseDouble(value);
         break;
+      case 43:                                    // Z Scaling (affects x coord and rotation)
+        zScale = Double.parseDouble(value);
+        break;
       case 50:                                    // Rotation angle (degrees)
         rotation = Double.parseDouble(value);
         break;
@@ -288,31 +655,33 @@ public class DXFReader {
 
     @Override
     Shape getShape () {
-      Block block = blockDict.get(blockHandle);
+      Block block = blockDict.get(blockName);
       if (block != null && block.entities.size() > 0) {
         Path2D.Double path = new Path2D.Double();
+        AffineTransform at1 = null;
+        if (block.baseX != 0 || block.baseY != 0) {
+          // TODO: make this work...
+          at1 = new AffineTransform();
+          at1.translate(block.baseX, block.baseY);
+        }
+        AffineTransform at2 = new AffineTransform();
+        if (zScale < 0) {
+          // Fixes "DXF Files that do not Render Properly/Floor plan.dxf" test file
+          at2.translate(-ix, iy);
+          at2.scale(-xScale, yScale);
+        } else {
+          at2.translate(ix, iy);
+          at2.scale(xScale, yScale);
+        }
+        at2.rotate(Math.toRadians(xScale < 0 ? - rotation : rotation));
         for (DrawItem entity : block.entities) {
           Shape shape = entity.getShape();
           if (shape != null) {
-            if (block.baseX != 0 || block.baseY != 0) {
+            if (at1 != null) {
               // TODO: make this work...
-              AffineTransform at = new AffineTransform();
-              at.translate(block.baseX, block.baseY);
-              shape = at.createTransformedShape(shape);
+              shape = at1.createTransformedShape(shape);
             }
-            if (ix != 0 || iy != 0 || xScale != 1.0 || yScale != 1.0 || rotation != 0) {
-              AffineTransform at = new AffineTransform();
-              if (ix != 0 || iy != 0) {
-                at.translate(ix, iy);
-              }
-              if (xScale != 1.0 || yScale != 1.0) {
-                at.scale(xScale, yScale);
-              }
-              if (rotation != 0) {
-                at.rotate(Math.toRadians(xScale < 0 ? - rotation : rotation));
-              }
-              shape = at.createTransformedShape(shape);
-            }
+            shape = at2.createTransformedShape(shape);
             path.append(shape, false);
           }
         }
@@ -326,7 +695,7 @@ public class DXFReader {
    * Note: code for "DIMENSION" is incomplete
    */
   class Dimen extends DrawItem implements AutoPop {
-    private String    blockHandle;
+    private String    blockHandle, blockName;
     private double    ax, ay, mx, my;
     private int       type, orientation;
 
@@ -337,7 +706,10 @@ public class DXFReader {
     @Override
     void addParm (int gCode, String value) {
       switch (gCode) {
-      case 2:                                     // Handle of Block to with Dimension graphics
+      case 2:                                     // Name of Block to with Dimension graphics
+        blockName = value;
+        break;
+      case 5:                                     // Handle of Block to with Dimension graphics
         blockHandle = value;
         break;
       case 10:                                    // Definition Point X
@@ -363,7 +735,7 @@ public class DXFReader {
 
     @Override
     Shape getShape () {
-      Block block = blockDict.get(blockHandle);
+      Block block = blockDict.get(blockName);
       if (block != null && block.entities.size() > 0) {
         Path2D.Double path = new Path2D.Double();
         for (DrawItem entity : block.entities) {
@@ -372,12 +744,6 @@ public class DXFReader {
             path.append(shape, false);
           }
         }
-        // Draw 'X' as placeholder for MTEXT at definition midpoint
-        double tenth = 1 * uScale;
-        path.moveTo(mx - tenth, my - tenth);
-        path.lineTo(mx + tenth, my + tenth);
-        path.moveTo(mx + tenth, my - tenth);
-        path.lineTo(mx - tenth, my + tenth);
         return path;
       }
       return null;
@@ -720,7 +1086,7 @@ public class DXFReader {
         hasXcp = hasYcp = false;
         if (cPoints.size() == numCPs) {
           // Convert Catmull-Rom Spline into Cubic Bezier Curve in a Path2D object
-          Point2D.Double[] points = cPoints.toArray(new Point2D.Double[cPoints.size()]);
+          Point2D.Double[] points = cPoints.toArray(new Point2D.Double[0]);
           if (!hasMoveTo) {
             path.moveTo(points[0].x, points[0].y);
             hasMoveTo = true;
@@ -908,6 +1274,9 @@ public class DXFReader {
         case "INSERT":
           addEntity(new Insert(value));
           break;
+        case "TEXT":
+          addEntity(new Text(value));
+          break;
         case "MTEXT":
           addEntity(new MText(value));
           break;
@@ -1040,6 +1409,7 @@ public class DXFReader {
           repaint();
         } catch (InterruptedException ex) {
           ex.printStackTrace();
+          return;
         }
       }
     }
