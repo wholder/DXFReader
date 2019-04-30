@@ -206,6 +206,14 @@ public class DXFReader {
     }
   }
 
+  // Text code
+  private void addX (Path2D.Double path, double cx, double cy, double tenth) {
+    path.moveTo(cx - tenth, cy - tenth);
+    path.lineTo(cx + tenth, cy + tenth);
+    path.moveTo(cx + tenth, cy - tenth);
+    path.lineTo(cx - tenth, cy + tenth);
+  }
+
   /**
    * Crude implementation of TEXT using GlyphVector to create vector outlines of text
    * Note: this code should use, or support vector fonts such as those by Hershey
@@ -309,17 +317,10 @@ public class DXFReader {
         // Test code
         Path2D.Double path = new Path2D.Double();
         // Draw 'X' as placeholder for MTEXT at definition midpoint
-        double tenth = 4 * uScale;
         if (hAdjust != 0 || vAdjust != 0) {
-          path.moveTo(ix2 - tenth, iy2 - tenth);
-          path.lineTo(ix2 + tenth, iy2 + tenth);
-          path.moveTo(ix2 + tenth, iy2 - tenth);
-          path.lineTo(ix2 - tenth, iy2 + tenth);
+          addX(path, ix2, iy2, 4 * uScale);
         } else {
-          path.moveTo(ix - tenth, iy - tenth);
-          path.lineTo(ix + tenth, iy + tenth);
-          path.moveTo(ix + tenth, iy - tenth);
-          path.lineTo(ix - tenth, iy + tenth);
+          addX(path, ix, iy, 4 * uScale);
         }
         return path;
       } else {
@@ -503,11 +504,7 @@ public class DXFReader {
         // Test code
         Path2D.Double path = new Path2D.Double();
         // Draw 'X' as placeholder for MTEXT at definition midpoint
-        double tenth = 1 * uScale;
-        path.moveTo(ix - tenth, iy - tenth);
-        path.lineTo(ix + tenth, iy + tenth);
-        path.moveTo(ix + tenth, iy - tenth);
-        path.lineTo(ix - tenth, iy + tenth);
+        addX(path, ix, iy, 1 * uScale);
         return path;
       } else {
         // Note: I had to scale up font size by 10x to make it render properly
@@ -750,16 +747,9 @@ public class DXFReader {
     }
   }
 
-  // TODO: implement ellipse code when I find an example file that uses as ELLIPSE
-  class Ellipse extends DrawItem implements AutoPop {
-    Ellipse (String type) {
-      super(type);
-    }
-  }
-
   class Circle extends DrawItem implements AutoPop {
     Ellipse2D.Double  circle = new Ellipse2D.Double();
-    private double    cx, cy, radius;
+    private double    cx, cy, mx, my, radius;
 
     Circle (String type) {
       super(type);
@@ -768,15 +758,15 @@ public class DXFReader {
     @Override
     void addParm (int gCode, String value) {
       switch (gCode) {
-      case 10:                                  // Center Point X1
-        cx = Double.parseDouble(value) * uScale;
-        break;
-      case 20:                                  // Center Point Y2
-        cy = Double.parseDouble(value) * uScale;
-        break;
-      case 40:                                  // Radius
-        radius = Double.parseDouble(value) * uScale;
-        break;
+        case 10:                                  // Center Point X1
+          cx = Double.parseDouble(value) * uScale;
+          break;
+        case 20:                                  // Center Point Y2
+          cy = Double.parseDouble(value) * uScale;
+          break;
+        case 40:                                  // Radius
+          radius = Double.parseDouble(value) * uScale;
+          break;
       }
     }
 
@@ -788,6 +778,76 @@ public class DXFReader {
     @Override
     void close () {
       circle.setFrame(cx - radius, cy - radius, radius * 2, radius * 2);
+    }
+  }
+
+  /**
+   * Crude implementation of ELLIPSE
+   * Note: does not currently handle Start and End Parameters
+   */
+  class Ellipse extends DrawItem implements AutoPop {
+    Ellipse2D.Double  ellipse = new Ellipse2D.Double();
+    private Shape     shape;
+    private double    cx, cy, mx, my, ratio, start, end;
+
+    Ellipse (String type) {
+      super(type);
+    }
+
+    @Override
+    void addParm (int gCode, String value) {
+      switch (gCode) {
+      case 10:                                  // Center Point X1
+        cx = Double.parseDouble(value) * uScale;
+        break;
+      case 11:                                  // Endpoint of major axis X
+        mx = Double.parseDouble(value) * uScale;
+        break;
+      case 20:                                  // Center Point Y2
+        cy = Double.parseDouble(value) * uScale;
+        break;
+      case 21:                                  // Endpoint of major axis Y
+        my = Double.parseDouble(value) * uScale;
+        break;
+      case 40:                                  // Ratio of minor axis to major axis
+        ratio = Double.parseDouble(value);
+        break;
+      case 41:                                  // Start parameter (this value is 0.0 for a full ellipse)
+        start = Double.parseDouble(value);
+        break;
+      case 42:                                  // End parameter (this value is 2pi for a full ellipse)
+        end = Double.parseDouble(value);
+        break;
+      }
+    }
+
+    @Override
+    Shape getShape () {
+      if (false) {
+        // Test code
+        Path2D.Double path = new Path2D.Double();
+        // Draw center point
+        addX(path, cx, cy, .2 * uScale);
+        // Draw Endpoint of major axis
+        addX(path, cx + mx, cy + my, .1 * uScale);
+        // Add ellipse
+        path.append(shape, false);
+        return path;
+      } else {
+        return shape;
+      }
+    }
+
+    @Override
+    void close () {
+      double hoff = Math.abs(Math.sqrt(mx * mx + my * my));
+      double voff = Math.abs(hoff * ratio);
+      ellipse.setFrame(-hoff, -voff, hoff * 2, voff * 2);
+      double angle = Math.atan2(my, mx);
+      AffineTransform at = new AffineTransform();
+      at.translate(cx, cy);
+      at.rotate(angle);
+      shape = at.createTransformedShape(ellipse);
     }
   }
 
@@ -1285,6 +1345,9 @@ public class DXFReader {
           break;
         case "CIRCLE":
           addEntity(new Circle(value));
+          break;
+        case "ELLIPSE":
+          addEntity(new Ellipse(value));
           break;
         case "ARC":
           addEntity(new Arc(value));
