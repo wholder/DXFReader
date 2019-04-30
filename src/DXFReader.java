@@ -47,6 +47,9 @@ public class DXFReader {
   private static final boolean  DEBUG = false;
   private static final boolean  INFO = false;
   private static final boolean  ANIMATE = false;
+  private boolean               drawText;
+  private boolean               drawMText;
+  private boolean               drawDimen;
   private ArrayList<DrawItem>   entities = new ArrayList<>();
   private ArrayList<Entity>     stack = new ArrayList<>();
   private Map<String,Block>     blockDict = new TreeMap<>();
@@ -212,6 +215,40 @@ public class DXFReader {
     path.lineTo(cx + tenth, cy + tenth);
     path.moveTo(cx + tenth, cy - tenth);
     path.lineTo(cx - tenth, cy + tenth);
+  }
+
+  // Provides a way to disable drawing of certain types
+  private boolean doDraw (DrawItem entity) {
+    if ((entity instanceof Text && !drawText) ||
+        (entity instanceof MText && !drawMText) ||
+        (entity instanceof Dimen && !drawDimen)) {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Enables drawing og TEXT objects (disabled by default)
+   * @param enable
+   */
+  public void setDrawText (boolean enable) {
+    drawText = enable;
+  }
+
+  /**
+   * Enables drawing og MTEXT objects (disabled by default)
+   * @param enable
+   */
+  public void setDrawMText (boolean enable) {
+    drawMText = enable;
+  }
+
+  /**
+   * Enables drawing og DIMENSION objects (disabled by default)
+   * @param enable
+   */
+  public void setDrawDimen (boolean enable) {
+    drawDimen = enable;
   }
 
   /**
@@ -672,14 +709,16 @@ public class DXFReader {
         }
         at2.rotate(Math.toRadians(xScale < 0 ? - rotation : rotation));
         for (DrawItem entity : block.entities) {
-          Shape shape = entity.getShape();
-          if (shape != null) {
-            if (at1 != null) {
-              // TODO: make this work...
-              shape = at1.createTransformedShape(shape);
+          if (doDraw(entity)) {
+            Shape shape = entity.getShape();
+            if (shape != null) {
+              if (at1 != null) {
+                // TODO: make this work...
+                shape = at1.createTransformedShape(shape);
+              }
+              shape = at2.createTransformedShape(shape);
+              path.append(shape, false);
             }
-            shape = at2.createTransformedShape(shape);
-            path.append(shape, false);
           }
         }
         return path;
@@ -1389,9 +1428,11 @@ public class DXFReader {
     }
     ArrayList<Shape> shapes = new ArrayList<>();
     for (DrawItem entity : entities) {
-      Shape shape = entity.getShape();
-      if (shape != null) {
-        shapes.add(shape);
+      if (doDraw(entity)) {
+        Shape shape = entity.getShape();
+        if (shape != null) {
+          shapes.add(shape);
+        }
       }
     }
     Shape[] sOut = new Shape[shapes.size()];
