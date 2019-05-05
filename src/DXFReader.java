@@ -229,25 +229,25 @@ public class DXFReader {
 
   /**
    * Enables drawing og TEXT objects (disabled by default)
-   * @param enable
+   * @param enable true to enable
    */
-  public void setDrawText (boolean enable) {
+  public void enableText (boolean enable) {
     drawText = enable;
   }
 
   /**
    * Enables drawing og MTEXT objects (disabled by default)
-   * @param enable
+   * @param enable true to enable
    */
-  public void setDrawMText (boolean enable) {
+  public void enableMText (boolean enable) {
     drawMText = enable;
   }
 
   /**
    * Enables drawing og DIMENSION objects (disabled by default)
-   * @param enable
+   * @param enable true to enable
    */
-  public void setDrawDimen (boolean enable) {
+  public void enableDimen (boolean enable) {
     drawDimen = enable;
   }
 
@@ -822,10 +822,9 @@ public class DXFReader {
 
   /**
    * Crude implementation of ELLIPSE
-   * Note: does not currently handle Start and End Parameters
    */
   class Ellipse extends DrawItem implements AutoPop {
-    Ellipse2D.Double  ellipse = new Ellipse2D.Double();
+    RectangularShape  ellipse;
     private Shape     shape;
     private double    cx, cy, mx, my, ratio, start, end;
 
@@ -879,6 +878,17 @@ public class DXFReader {
 
     @Override
     void close () {
+      if (start != 0 || end != 0) {
+        ellipse = new Arc2D.Double();
+        double startAngle = Math.toDegrees(start);
+        double endAngle = Math.toDegrees(end);
+        // Make angle negative so it runs clockwise when using Arc2D.Double
+        ((Arc2D.Double) ellipse).setAngleStart(-startAngle);
+        double extent = startAngle - (endAngle < startAngle ? endAngle + 360 : endAngle);
+        ((Arc2D.Double) ellipse).setAngleExtent(extent);
+      } else {
+        ellipse = new Ellipse2D.Double();
+      }
       double hoff = Math.abs(Math.sqrt(mx * mx + my * my));
       double voff = Math.abs(hoff * ratio);
       ellipse.setFrame(-hoff, -voff, hoff * 2, voff * 2);
@@ -935,7 +945,7 @@ public class DXFReader {
   }
 
   class Line extends DrawItem implements AutoPop {
-    Path2D.Double         path = new Path2D.Double();
+    Line2D.Double         line;
     private double        xStart, yStart, xEnd, yEnd;
 
     Line (String type) {
@@ -962,13 +972,12 @@ public class DXFReader {
 
     @Override
     void close () {
-      path.moveTo(xStart, yStart);
-      path.lineTo(xEnd, yEnd);
+      line = new Line2D.Double(xStart, yStart, xEnd, yEnd);
     }
 
     @Override
     Shape getShape () {
-      return path;
+      return line;
     }
   }
 
