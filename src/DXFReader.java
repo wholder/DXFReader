@@ -1160,7 +1160,7 @@ public class DXFReader {
     private double        xCp, yCp;
     private boolean       hasXcp, hasYcp;
     private boolean       closed;
-    private int           numCPs, flags;
+    private int           numCPs, flags, degree;
     private boolean       hasMoveTo;
 
     Spline (String type) {
@@ -1178,9 +1178,13 @@ public class DXFReader {
         yCp = Double.parseDouble(value) * uScale;
         hasYcp = true;
         break;
-      case 70:                                    // Flags
+      case 70:                                    // Flags (bitfield)
+        // bit 0: Closed spline, bit 1:  Periodic spline, bit 2: Rational spline, bit 3: Planar, bit 4: Linear (planar bit is also set)
         flags = Integer.parseInt(value);
         closed = (flags & 0x01) != 0;
+        break;
+      case 71:                                    // Degree of the spline curve
+        degree = Integer.parseInt(value);
         break;
       case 73:                                    // Number of Control Points
         numCPs = Integer.parseInt(value);
@@ -1193,43 +1197,15 @@ public class DXFReader {
         cPoints.add(new Point2D.Double(xCp, yCp));
         hasXcp = hasYcp = false;
         if (cPoints.size() == numCPs) {
-          // Convert Catmull-Rom Spline into Cubic Bezier Curve in a Path2D object
-          Point2D.Double[] points = cPoints.toArray(new Point2D.Double[0]);
-          if (!hasMoveTo) {
+          if (degree == 3) {
+            Point2D.Double[] points = cPoints.toArray(new Point2D.Double[0]);
             path.moveTo(points[0].x, points[0].y);
-            hasMoveTo = true;
-          }
-          int end = closed ? points.length + 1 : points.length;
-          for (int ii = 0;  ii < end - 1; ii++) {
-            Point2D.Double p0, p1, p2, p3;
-            if (closed) {
-              int idx0 = Math.floorMod(ii - 1, points.length);
-              int idx1 = Math.floorMod(idx0 + 1, points.length);
-              int idx2 = Math.floorMod(idx1 + 1, points.length);
-              int idx3 = Math.floorMod(idx2 + 1, points.length);
-              p0 = new Point2D.Double(points[idx0].x, points[idx0].y);
-              p1 = new Point2D.Double(points[idx1].x, points[idx1].y);
-              p2 = new Point2D.Double(points[idx2].x, points[idx2].y);
-              p3 = new Point2D.Double(points[idx3].x, points[idx3].y);
-            } else {
-              p0 = new Point2D.Double(points[Math.max(ii - 1, 0)].x, points[Math.max(ii - 1, 0)].y);
-              p1 = new Point2D.Double(points[ii].x, points[ii].y);
-              p2 = new Point2D.Double(points[ii + 1].x, points[ii + 1].y);
-              p3 = new Point2D.Double(points[Math.min(ii + 2, points.length - 1)].x, points[Math.min(ii + 2, points.length - 1)].y);
+            for (int ii = 1; ii < points.length; ii += 3) {
+              path.curveTo(points[ii].x, points[ii].y, points[ii + 1].x, points[ii + 1].y, points[ii + 2].x, points[ii + 2].y);
             }
-            // Catmull-Rom to Cubic Bezier conversion matrix
-            //    0       1       0       0
-            //  -1/6      1      1/6      0
-            //    0      1/6      1     -1/6
-            //    0       0       1       0
-            double x1 = (-p0.x + 6 * p1.x + p2.x) / 6;  // First control point
-            double y1 = (-p0.y + 6 * p1.y + p2.y) / 6;
-            double x2 = ( p1.x + 6 * p2.x - p3.x) / 6;  // Second control point
-            double y2 = ( p1.y + 6 * p2.y - p3.y) / 6;
-            double x3 = p2.x;                           // End point
-            double y3 = p2.y;
-            path.curveTo(x1, y1, x2, y2, x3, y3);
           }
+        } else {
+          // Does this happen?
         }
       }
     }
@@ -1556,6 +1532,8 @@ public class DXFReader {
         int yOff = 30;
         g2.setFont(new Font("Monaco", Font.PLAIN, 12));
         g2.drawString("Paths:      " + shapes.length, 20, yOff);
+        yOff += 15;
+        g2.drawString("Location:   " + df.format(dxf.bounds.getX()) + " x " + df.format(dxf.bounds.getY()), 20, yOff);
         yOff += 15;
         g2.drawString("Original:   " + df.format(dxf.bounds.getWidth()) + " x " + df.format(dxf.bounds.getHeight()) + " inches", 20, yOff);
         yOff += 15;
