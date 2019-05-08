@@ -57,7 +57,7 @@ public class DXFReader {
   private Rectangle2D           bounds;
   private double                uScale = 0.039370078740157; // default to millimeters as units
   private String                units = "millimeters";
-  private boolean               scaled, useMillimeters;
+  private boolean               scaled;
 
   interface AutoPop {}
 
@@ -290,7 +290,7 @@ public class DXFReader {
                 ii++;
               }
               // todo: how to convert value of "code" into special character
-              buf.append("\uFFFD");                 // Insert Unicode unknown character symbol
+              buf.append("\uFFFD");                 // Insert Unicode "unknown character" symbol
               ii--;
             } else {
             switch (cc) {
@@ -437,7 +437,7 @@ public class DXFReader {
    */
   class MText extends DrawItem implements AutoPop {
     private Canvas    canvas = new Canvas();
-    private String    text, textStyle;
+    private String    text;
     private double    ix, iy, textHeight, refWidth, xRot, yRot;
     private int       attachPoint;
 
@@ -513,7 +513,6 @@ public class DXFReader {
         }
         break;
       case 7:                                       // Text style name (STANDARD if not provided) (optional)
-        textStyle = value;
         break;
       case 10:                                      // Insertion X
         ix = Double.parseDouble(value) * uScale;
@@ -612,7 +611,6 @@ public class DXFReader {
   }
 
   class Block extends Entity {
-    private String          name, handle;
     private List<DrawItem>  entities = new ArrayList<>();
     private double          baseX, baseY;
     private int             flags;
@@ -625,11 +623,9 @@ public class DXFReader {
     void addParm (int gCode, String value) {
       switch (gCode) {
       case 2:                                       // Block name
-        name  = value;
-        blockDict.put(name, this);
+        blockDict.put(value, this);
         break;
       case 5:                                       // Block handle
-        handle = value;
         break;
       case 10:                                      // Base Point X
         baseX = Double.parseDouble(value) * uScale;
@@ -794,7 +790,7 @@ public class DXFReader {
 
   class Circle extends DrawItem implements AutoPop {
     Ellipse2D.Double  circle = new Ellipse2D.Double();
-    private double    cx, cy, mx, my, radius;
+    private double    cx, cy, radius;
 
     Circle (String type) {
       super(type);
@@ -1077,7 +1073,6 @@ public class DXFReader {
     Path2D.Double         path;
     List<LSegment>        segments = new ArrayList<>();
     LSegment              cSeg;
-    private int           vertices;
     private double        xCp, yCp;
     private boolean       hasXcp, hasYcp;
     private boolean       close;
@@ -1112,12 +1107,9 @@ public class DXFReader {
         break;
       case 42:                                      // Bulge factor  (positive = right, negative = left)
         cSeg.bulge = Double.parseDouble(value);
-        if ((1 - Math.abs(cSeg.bulge)) < .001) {
-          int dum = 0;
-        }
         break;
       case 90:                                      // Number of Vertices
-        vertices = Integer.parseInt(value);
+        int vertices = Integer.parseInt(value);
         break;
       }
       if (hasXcp && hasYcp) {
@@ -1166,8 +1158,8 @@ public class DXFReader {
     private double        xCp, yCp;
     private boolean       hasXcp, hasYcp;
     private boolean       closed;
-    private int           numCPs, flags, degree;
-    private boolean       hasMoveTo;
+    private int           numCPs;
+    private int           degree;
 
     Spline (String type) {
       super(type);
@@ -1189,7 +1181,7 @@ public class DXFReader {
         // Examples:
         //    10 = Closed, Periodic, Planar Spline
         //
-        flags = Integer.parseInt(value);
+        int flags = Integer.parseInt(value);
         closed = (flags & 0x01) != 0;
         break;
       case 71:                                    // Degree of the spline curve
@@ -1197,9 +1189,6 @@ public class DXFReader {
         break;
       case 73:                                    // Number of Control Points
         numCPs = Integer.parseInt(value);
-        break;
-      default:
-        //System.out.println("Spline.addParm() unimplemented gCode: " + gCode + ", val: " + value);
         break;
       }
       if (hasXcp && hasYcp) {
@@ -1213,8 +1202,12 @@ public class DXFReader {
               path.curveTo(points[ii].x, points[ii].y, points[ii + 1].x, points[ii + 1].y, points[ii + 2].x, points[ii + 2].y);
             }
           }
-        } else {
-          // Does this happen?
+        } else if (degree == 2) {
+          Point2D.Double[] points = cPoints.toArray(new Point2D.Double[0]);
+          path.moveTo(points[0].x, points[0].y);
+          for (int ii = 1; ii < points.length; ii += 2) {
+            path.quadTo(points[ii].x, points[ii].y, points[ii + 1].x, points[ii + 1].y);
+          }
         }
       }
     }
@@ -1313,8 +1306,7 @@ public class DXFReader {
       String line = lines.nextLine().trim();
       String value = lines.nextLine().trim();
       int gCode = Integer.parseInt(line);
-      switch (gCode) {
-      case 0:                             // Entity type
+      if (gCode == 0) {                             // Entity type
         if (cEntity instanceof AutoPop) {
           pop();
         }
@@ -1322,102 +1314,100 @@ public class DXFReader {
           debugPrint(value);
         }
         switch (value) {
-        case "SECTION":
-          cEntity = new Section(value);
-          break;
-        case "ENDSEC":
-          if (cEntity instanceof Section) {
-            Section section = (Section) cEntity;
-            if ("HEADER".equals(section.sType)) {
-              Map<Integer,String> attrs = section.attributes.get("$INSUNITS");
-              if (attrs != null) {
-                String units = attrs.get(70);
-                setUnits(units);
-              }
-              attrs = section.attributes.get("$LUNITS");
-              if (attrs != null) {
-                String units = attrs.get(70);
-                setUnits(units);
+          case "SECTION":
+            cEntity = new Section(value);
+            break;
+          case "ENDSEC":
+            if (cEntity instanceof Section) {
+              Section section = (Section) cEntity;
+              if ("HEADER".equals(section.sType)) {
+                Map<Integer, String> attrs = section.attributes.get("$INSUNITS");
+                if (attrs != null) {
+                  String units = attrs.get(70);
+                  setUnits(units);
+                }
+                attrs = section.attributes.get("$LUNITS");
+                if (attrs != null) {
+                  String units = attrs.get(70);
+                  setUnits(units);
+                }
               }
             }
-          }
-          cEntity = null;
-          stack.clear();
-          break;
-        case "TABLE":
-          push();
-          cEntity = new Entity(value);
-          break;
-        case "ENDTAB":
-          pop();
-          break;
-        case "BLOCK":
-          push();
-          cEntity = new Block(value);
-          break;
-        case "ENDBLK":
-          pop();
-          while ("BLOCK".equals(cEntity.type)) {
-            pop();
-          }
-          break;
-        case "SPLINE":
-          addEntity(new Spline(value));
-          break;
-        case "INSERT":
-          addEntity(new Insert(value));
-          break;
-        case "TEXT":
-          addEntity(new Text(value));
-          break;
-        case "MTEXT":
-          addEntity(new MText(value));
-          break;
-        case "HATCH":
-          addEntity(new Hatch(value));
-          break;
-        case "CIRCLE":
-          addEntity(new Circle(value));
-          break;
-        case "ELLIPSE":
-          addEntity(new Ellipse(value));
-          break;
-        case "ARC":
-          addEntity(new Arc(value));
-          break;
-        case "LINE":
-          addEntity(new Line(value));
-          break;
-        case "DIMENSION":
-          addEntity(new Dimen(value));
-          break;
-        case "POLYLINE":
-          addEntity(new Polyline(value));
-          break;
-        case "LWPOLYLINE":
-          addEntity( new LwPolyline(value));
-          break;
-        case "VERTEX":
-          if (cEntity != null && !"VERTEX".equals(cEntity.type)) {
+            cEntity = null;
+            stack.clear();
+            break;
+          case "TABLE":
             push();
-          }
-          addChildToTop(cEntity = new Vertex(value));
-          break;
-        case "SEQEND":
-          while (stack.size() > 0 && !"BLOCK".equals(cEntity.type)) {
+            cEntity = new Entity(value);
+            break;
+          case "ENDTAB":
             pop();
-          }
-          break;
+            break;
+          case "BLOCK":
+            push();
+            cEntity = new Block(value);
+            break;
+          case "ENDBLK":
+            pop();
+            while ("BLOCK".equals(cEntity.type)) {
+              pop();
+            }
+            break;
+          case "SPLINE":
+            addEntity(new Spline(value));
+            break;
+          case "INSERT":
+            addEntity(new Insert(value));
+            break;
+          case "TEXT":
+            addEntity(new Text(value));
+            break;
+          case "MTEXT":
+            addEntity(new MText(value));
+            break;
+          case "HATCH":
+            addEntity(new Hatch(value));
+            break;
+          case "CIRCLE":
+            addEntity(new Circle(value));
+            break;
+          case "ELLIPSE":
+            addEntity(new Ellipse(value));
+            break;
+          case "ARC":
+            addEntity(new Arc(value));
+            break;
+          case "LINE":
+            addEntity(new Line(value));
+            break;
+          case "DIMENSION":
+            addEntity(new Dimen(value));
+            break;
+          case "POLYLINE":
+            addEntity(new Polyline(value));
+            break;
+          case "LWPOLYLINE":
+            addEntity(new LwPolyline(value));
+            break;
+          case "VERTEX":
+            if (cEntity != null && !"VERTEX".equals(cEntity.type)) {
+              push();
+            }
+            addChildToTop(cEntity = new Vertex(value));
+            break;
+          case "SEQEND":
+            while (stack.size() > 0 && !"BLOCK".equals(cEntity.type)) {
+              pop();
+            }
+            break;
         }
-        break;
-      default:
+      } else {
         if (cEntity != null) {
           if (DEBUG) {
             debugPrint(gCode + ": " + value);
           }
           cEntity.addParm(gCode, value);
         }
-        break;
       }
     }
     ArrayList<Shape> shapes = new ArrayList<>();
