@@ -56,18 +56,24 @@ public class DXFReader {
   private Entity                cEntity = null;
   private Rectangle2D           bounds;
   private double                uScale = 0.039370078740157; // default to millimeters as units
-  private String                units = "unknown";
+  private String                units = "millimeters";
   private boolean               scaled, useMillimeters;
 
   interface AutoPop {}
 
 
-  public DXFReader() {
-    this(true);
+  DXFReader() {
+    this("mm");
   }
 
-  public DXFReader (boolean useMillimeters) {
-    this.useMillimeters = useMillimeters;
+  DXFReader (String dUnits) {
+    if ("in".equals(dUnits)) {
+      uScale = 1.0;
+      units = "inches";
+    } else if ("cm".equals(dUnits)) {
+      uScale = 0.39370078740157;
+      units = "centimeters";
+    }
   }
 
   class Entity {
@@ -121,9 +127,9 @@ public class DXFReader {
   private void setUnits (String val) {
     if (val != null) {
       switch (Integer.parseInt(val)) {
-      case 0:             // unitless (millimeters, or inches)
-        uScale = useMillimeters ? 0.039370078740157 : 1.0;
-        units = "unitless";
+      case 0:             // unitless (assume millimeters)
+        uScale = 0.039370078740157;
+        units = "millimeters";
         break;
       case 1:             // inches
         uScale = 1.0;
@@ -1180,6 +1186,9 @@ public class DXFReader {
         break;
       case 70:                                    // Flags (bitfield)
         // bit 0: Closed spline, bit 1:  Periodic spline, bit 2: Rational spline, bit 3: Planar, bit 4: Linear (planar bit is also set)
+        // Examples:
+        //    10 = Closed, Periodic, Planar Spline
+        //
         flags = Integer.parseInt(value);
         closed = (flags & 0x01) != 0;
         break;
